@@ -1,0 +1,18 @@
+import { generateTextures } from '../textures.js';
+import { loadSave } from '../save.js';
+import { setMuted } from '../audio.js';
+import { Poki } from '../poki.js';
+
+export class BootScene extends Phaser.Scene {
+  constructor() { super('Boot'); }
+
+  create() {
+    generateTextures(this);
+    const save = loadSave();
+    setMuted(save.muted);
+    this.registry.set('save', save);
+    Poki.init().then(() => Poki.gameLoadingFinished());
+    // 首次进入直接开局（GDD §1：秒进游戏）；老玩家进菜单（有离线宝箱/强化）
+    this.scene.start(save.runs === 0 ? 'Game' : 'Menu');
+  }
+}
