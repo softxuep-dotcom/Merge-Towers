@@ -48,8 +48,9 @@ function noise({ dur = 0.08, vol = 0.15, delay = 0 }) {
 // 大调音阶 do re mi fa so la si do —— 合成等级越高音越高（GDD §6.8）
 const SCALE = [0, 2, 4, 5, 7, 9, 11, 12];
 export const Sfx = {
-  merge(lv) {
-    const semi = SCALE[Math.min(lv - 1, SCALE.length - 1)];
+  merge(lv, chain = 1) {
+    const idx = Math.max(0, lv - 1 + Math.max(0, chain - 1));
+    const semi = SCALE[idx % SCALE.length] + 12 * Math.floor(idx / SCALE.length);
     const f = 330 * Math.pow(2, semi / 12);
     tone({ freq: f, dur: 0.12, type: 'triangle', vol: 0.3 });
     tone({ freq: f * 1.5, dur: 0.2, type: 'sine', vol: 0.22, delay: 0.07 });
@@ -76,4 +77,19 @@ export const Sfx = {
   gameOver() { [392, 330, 262, 196].forEach((f, i) => tone({ freq: f, dur: 0.3, type: 'triangle', vol: 0.22, delay: i * 0.18 })); },
   diamond() { tone({ freq: 1760, end: 2349, dur: 0.12, type: 'sine', vol: 0.15 }); },
   freeze() { tone({ freq: 1200, end: 400, dur: 0.2, type: 'sine', vol: 0.12 }); },
+  surge() {
+    noise({ dur: 0.12, vol: 0.16 });
+    tone({ freq: 170, end: 420, dur: 0.16, type: 'sawtooth', vol: 0.13 });
+  },
+  resonance(chain) {
+    const base = 392 + Math.min(chain, 7) * 26;
+    [0, 4, 7].forEach((s, i) => tone({ freq: base * Math.pow(2, s / 12), dur: 0.14, type: 'triangle', vol: 0.18, delay: i * 0.045 }));
+  },
+  lastStand() {
+    noise({ dur: 0.22, vol: 0.2 });
+    [82, 123, 164].forEach((f, i) => tone({ freq: f, end: f * 0.72, dur: 0.45, type: 'sawtooth', vol: 0.22, delay: i * 0.08 }));
+  },
+  clutch() {
+    [523, 659, 784, 1046].forEach((f, i) => tone({ freq: f, dur: 0.18, type: 'triangle', vol: 0.24, delay: i * 0.055 }));
+  },
 };

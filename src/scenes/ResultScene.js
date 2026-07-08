@@ -24,17 +24,33 @@ export class ResultScene extends Phaser.Scene {
     const lines = [
       `击杀敌人：${d.kills}`,
       `历史最高：第 ${S.best} 波`,
+      `阵容：${d.diagnosis?.elements || '无塔'}`,
       ``,
       `💎 本局获得：${d.dRun}（含阵亡补偿 ${d.deathBonus}）`,
       `💎 当前持有：${S.diamonds}`,
     ];
-    this.add.text(W / 2, 560, lines.join('\n'), {
+    this.add.text(W / 2, 540, lines.join('\n'), {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '27px', color: '#c9d2f0',
       align: 'center', lineSpacing: 12,
     }).setOrigin(0.5);
 
+    const diagnosis = this.add.text(W / 2, 720, d.diagnosis?.text || '试试解锁新元素，换个流派再战', {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
+      fontSize: '22px',
+      color: d.diagnosis?.upgradeId ? '#ffe97a' : '#c9d2f0',
+      fontStyle: 'bold',
+      align: 'center',
+      wordWrap: { width: 520 },
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5);
+    if (d.diagnosis?.upgradeId) {
+      diagnosis.setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => openShop(this, S));
+    }
+
     // 引导去强化：钻石够买任何一档时高亮提示
-    this.add.text(W / 2, 720, '💡 去强化工坊变强，下局走得更远', {
+    this.add.text(W / 2, 792, '💡 去强化工坊变强，下局走得更远', {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '22px', color: '#8f9ab8',
     }).setOrigin(0.5);
 

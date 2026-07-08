@@ -12,6 +12,8 @@ const DEFAULT = {
   muted: false,
   adDiamondDay: '', // 当日看广告领钻计数
   adDiamondCount: 0,
+  lastDiagnosisKey: '',
+  lastDiagnosisCount: 0,
 };
 
 export function loadSave() {
@@ -30,11 +32,10 @@ export function writeSave(s) {
 
 export function tier(s, id) { return s.up[id] || 0; }
 
-// 已解锁元素：火冰初始；电第 2 局起；毒/光走商店
-export function unlockedElements(s) {
-  const list = ['fire', 'ice'];
-  if (s.runs >= 1) list.push('lightning');
-  if (tier(s, 'unlockPoison')) list.push('poison');
+// 已解锁元素：火冰电初始；毒随局内波次自然入池；光暂走局外解锁
+export function unlockedElements(s, wave = 1) {
+  const list = ['fire', 'ice', 'lightning'];
+  if (wave >= 8 || tier(s, 'unlockPoison')) list.push('poison');
   if (tier(s, 'unlockLight')) list.push('light');
   return list;
 }

@@ -6,6 +6,11 @@ import { Poki } from '../poki.js';
 export class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
 
+  preload() {
+    // 森林背景图（可选资源：缺失时回退程序化绘制）
+    this.load.image('map_bg', 'assets/maps/forest-grid-bg.png');
+  }
+
   create() {
     generateTextures(this);
     const save = loadSave();
