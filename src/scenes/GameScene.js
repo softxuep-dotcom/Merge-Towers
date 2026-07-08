@@ -7,7 +7,10 @@ import {
 import { Enemy, Path } from '../classes/Enemy.js';
 import { Tower } from '../classes/Tower.js';
 import { makeButton, toast } from '../ui.js';
-import { Sfx, setMuted, isMuted } from '../audio.js';
+import {
+  Sfx, setMuted, isMuted, unlockAudio,
+  startStageAudio, stopStageAudio, setAudioPhase,
+} from '../audio.js';
 import { Poki } from '../poki.js';
 import { writeSave, tier, unlockedElements } from '../save.js';
 
@@ -27,6 +30,8 @@ const TYPE_ICON = { slime: '🟣', runner: '💨', tank: '🛡️', flyer: '🐝
 const TYPE_CN = { slime: '小兵', runner: '疾行者', tank: '铁盾兵', flyer: '飞行兵', splitter: '分裂怪', boss: 'Boss', mini: '小怪' };
 const ELITE_ICON = { shield: '🛡', haste: '🌀', split: '✹' };
 const BOSS_AFFIX_KEYS = ['resilient', 'armored', 'twin', 'rage'];
+const LANDSCAPE_SIDEBAR_MIN = 360;
+const LANDSCAPE_SIDEBAR_MAX = 430;
 
 export class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
@@ -36,6 +41,8 @@ export class GameScene extends Phaser.Scene {
     // ---- 局内状态 ----
     this.gold = Math.round((40 + 20 * tier(S, 'startGold')) * (S.coupon ? 1.5 : 1));
     if (S.coupon) { S.coupon = false; writeSave(S); }
+    this.displayGold = this.gold;
+    this.goldRollTween = null;
     this.maxBase = BASE_HP + 2 * tier(S, 'baseArmor');
     this.baseHp = this.maxBase;
     this.wave = 1;
@@ -53,6 +60,7 @@ export class GameScene extends Phaser.Scene {
     this.lastStandText = null;
     this.deathWave = 0;
     this.adGifts = 0;
+    this.runSpeedUnlocked = tier(S, 'speed2x') > 0;
     this.speedMult = 1;
     this.slowmoT = 0;
     this.atkBuffT = 0;
@@ -81,6 +89,7 @@ export class GameScene extends Phaser.Scene {
     this.dmgCount = 0;
     this.coinCount = 0;
     this.lastKillSfx = 0;
+    this.installAudioLifecycle();
 
     this.path = new Path(PATH_PTS);
     this.flyPath = new Path(FLY_PTS);
@@ -180,37 +189,27 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // 开发用：叠加路径与塔位标记校准坐标（发布前移除调用即可）
-  debugMap() {
-    const g = this.add.graphics().setDepth(3500);
-    g.lineStyle(4, 0xff00ff, 0.8);
-    g.strokePoints(PATH_PTS.map(p => new Phaser.Math.Vector2(p.x, p.y)), false);
-    g.lineStyle(2, 0x00ffff, 0.8);
-    g.strokePoints(FLY_PTS.map(p => new Phaser.Math.Vector2(p.x, p.y)), false);
-    for (const s of this.slots) {
-      g.lineStyle(3, 0xffff00, 0.9);
-      g.strokeCircle(s.x, s.y, 40);
-      g.lineBetween(s.x - 10, s.y, s.x + 10, s.y);
-      g.lineBetween(s.x, s.y - 10, s.x, s.y + 10);
-    }
-    this.time.delayedCall(8000, () => g.destroy());
-    return 'debug overlay 8s';
-  }
-
   buildUI() {
+    this.layoutBg = this.add.rectangle(W / 2, H / 2, W, H, 0x12131f, 1).setDepth(-40);
+    this.sidebarBg = this.add.rectangle(W / 2, H / 2, 1, 1, 0x161825, 0.94).setDepth(995).setVisible(false);
+    this.sidebarDivider = this.add.rectangle(W / 2, H / 2, 2, H, 0x2d3348, 1).setDepth(996).setVisible(false);
+
     // 顶部状态栏
-    this.add.rectangle(W / 2, 30, W, 60, 0x161825, 0.9).setDepth(1000);
+    this.topBar = this.add.rectangle(W / 2, 30, W, 60, 0x161825, 0.9).setDepth(1000);
     this.waveText = this.uiText(20, 30, '', 26, '#ffffff').setOrigin(0, 0.5);
     this.heartText = this.uiText(180, 30, '', 24, '#ff7a7a').setOrigin(0, 0.5);
-    this.add.image(332, 30, 'coin').setDepth(1001).setScale(1.2);
+    this.coinIcon = this.add.image(332, 30, 'coin').setDepth(1001).setScale(1.2);
     this.goldText = this.uiText(350, 30, '0', 26, '#ffd34e').setOrigin(0, 0.5);
-    this.add.image(516, 30, 'diamond').setDepth(1001).setScale(0.9);
+    this.diamondIcon = this.add.image(516, 30, 'diamond').setDepth(1001).setScale(0.9);
     this.diamondText = this.uiText(534, 30, '0', 26, '#9fe8ff').setOrigin(0, 0.5);
     this.muteBtn = this.uiText(688, 30, isMuted() ? '🔇' : '🔊', 28).setOrigin(0.5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => {
-        setMuted(!isMuted());
+        const nextMuted = !isMuted();
+        if (!nextMuted) unlockAudio();
+        setMuted(nextMuted);
         this.S.muted = isMuted(); writeSave(this.S);
         this.muteBtn.setText(isMuted() ? '🔇' : '🔊');
+        if (!isMuted()) startStageAudio(phaseFor(this.wave));
       });
 
     // Boss 血条
@@ -221,7 +220,7 @@ export class GameScene extends Phaser.Scene {
     this.previewText = this.uiText(W / 2, 110, '', 24, '#c9d2f0').setOrigin(0.5);
 
     // 底部面板（背景图模式半透明，露出城堡）
-    this.add.rectangle(W / 2, 1130, W, 300, 0x161825, this.hasBg ? 0.82 : 0.95).setDepth(1000);
+    this.bottomPanel = this.add.rectangle(W / 2, 1130, W, 300, 0x161825, this.hasBg ? 0.82 : 0.95).setDepth(1000);
 
     // 提前召唤
     this.callBtn = makeButton(this, W / 2, 1012, 340, 58, '⚔ 提前召唤 +10%金币', {
@@ -247,12 +246,146 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(1002);
 
     // 2 倍速（局外解锁后显示）
-    this.speedBtn = makeButton(this, 610, 1195, 180, 70, '▶ x1', {
+    this.speedBtn = makeButton(this, 610, 1195, 180, 70, '', {
       bg: 0x3b4568, fontSize: 24,
       onClick: () => this.toggleSpeed(),
-    }).setDepth(1002).setVisible(tier(this.S, 'speed2x') > 0);
+    }).setDepth(1002);
+    this.updateSpeedButton();
 
+    if (typeof this.applyResponsiveLayout === 'function') this.applyResponsiveLayout();
     this.updateUI();
+  }
+
+  applyResponsiveLayout() {
+    const viewW = this.scale.width || W;
+    const viewH = this.scale.height || H;
+    const landscape = viewW > viewH && viewW > W + 160;
+    const sidebarW = landscape
+      ? Phaser.Math.Clamp(Math.round(viewW * 0.22), LANDSCAPE_SIDEBAR_MIN, LANDSCAPE_SIDEBAR_MAX)
+      : 0;
+    const gutter = landscape ? 36 : 0;
+    const contentW = landscape ? Math.min(viewW, W + gutter + sidebarW) : W;
+    const fieldOffset = landscape ? Math.max(0, Math.round((viewW - contentW) / 2)) : 0;
+    const fieldAreaW = landscape ? fieldOffset + W + gutter : W;
+    const fieldCenterScreen = landscape ? fieldOffset + W / 2 : W / 2;
+
+    this.cameras.main.setZoom(1);
+    this.cameras.main.setScroll(-fieldOffset, 0);
+    this.cameras.main.setBackgroundColor('#12131f');
+    this.layout = {
+      key: `${viewW}x${viewH}`,
+      viewW,
+      viewH,
+      landscape,
+      sidebarW,
+      fieldAreaW,
+      fieldCenterScreen,
+      fieldOffset,
+      x: sx => sx - fieldOffset,
+    };
+
+    this.setRect(this.layoutBg, this.layout.x(viewW / 2), viewH / 2, viewW, viewH);
+    this.setRect(this.vignette, this.layout.x(viewW / 2), viewH / 2, viewW, viewH);
+    this.setRect(this.flash, this.layout.x(viewW / 2), viewH / 2, viewW, viewH);
+
+    if (landscape) this.applyLandscapeUI();
+    else this.applyPortraitUI();
+  }
+
+  ensureResponsiveLayout() {
+    const key = `${this.scale.width || W}x${this.scale.height || H}`;
+    if (!this.layout || this.layout.key !== key) this.applyResponsiveLayout();
+  }
+
+  setRect(rect, x, y, w, h) {
+    rect.setPosition(x, y);
+    if (rect.setSize) rect.setSize(w, h);
+    rect.width = w;
+    rect.height = h;
+  }
+
+  setUi(obj, screenX, screenY) {
+    obj.setPosition(this.layout.x(screenX), screenY);
+    return obj;
+  }
+
+  setUiRect(rect, screenX, screenY, w, h) {
+    this.setRect(rect, this.layout.x(screenX), screenY, w, h);
+    return rect;
+  }
+
+  applyPortraitUI() {
+    const bottom = this.layout.viewH;
+    const panelY = bottom - 150;
+    const callY = bottom - 268;
+    const actionY = bottom - 125;
+
+    this.sidebarBg.setVisible(false);
+    this.sidebarDivider.setVisible(false);
+    this.bottomPanel.setVisible(true);
+
+    this.setUiRect(this.topBar, W / 2, 30, W, 60);
+    this.setUi(this.waveText, 20, 30).setOrigin(0, 0.5);
+    this.setUi(this.heartText, 180, 30).setOrigin(0, 0.5);
+    this.setUi(this.coinIcon, 332, 30).setScale(1.2);
+    this.setUi(this.goldText, 350, 30).setOrigin(0, 0.5);
+    this.setUi(this.diamondIcon, 516, 30).setScale(0.9);
+    this.setUi(this.diamondText, 534, 30).setOrigin(0, 0.5);
+    this.setUi(this.muteBtn, 688, 30).setOrigin(0.5);
+
+    this.bossBarMaxWidth = 600;
+    this.setUiRect(this.bossBarBg, W / 2, 74, 604, 14);
+    this.bossBar.setPosition(this.layout.x(W / 2 - 300), 74);
+    this.bossBar.height = 10;
+    this.setUi(this.previewText, W / 2, 110).setOrigin(0.5);
+
+    this.setUiRect(this.bottomPanel, W / 2, panelY, W, 300);
+    this.setUi(this.callBtn, W / 2, callY);
+    this.setUi(this.buyBtn, 360, actionY);
+    this.sellRect = new Phaser.Geom.Rectangle(30, bottom - 190, 160, 130);
+    this.setUiRect(this.sellZone, 110, actionY, 160, 130);
+    this.setUi(this.sellText, 110, actionY).setOrigin(0.5);
+    this.setUi(this.giftBtn, 610, bottom - 175);
+    this.setUi(this.speedBtn, 610, bottom - 85);
+  }
+
+  applyLandscapeUI() {
+    const { viewW, viewH, sidebarW, fieldAreaW } = this.layout;
+    const sideCenter = fieldAreaW + sidebarW / 2;
+    const sideLeft = fieldAreaW + 24;
+    const sideRight = fieldAreaW + sidebarW - 24;
+
+    this.sidebarBg.setVisible(true);
+    this.sidebarDivider.setVisible(true);
+    this.bottomPanel.setVisible(false);
+    this.setUiRect(this.sidebarBg, sideCenter, viewH / 2, sidebarW, viewH);
+    this.setUiRect(this.sidebarDivider, fieldAreaW, viewH / 2, 2, viewH);
+
+    this.setUiRect(this.topBar, sideCenter, 76, sidebarW - 34, 120);
+    this.setUi(this.waveText, sideLeft + 12, 42).setOrigin(0, 0.5);
+    this.setUi(this.heartText, sideLeft + 150, 42).setOrigin(0, 0.5);
+    this.setUi(this.coinIcon, sideLeft + 22, 93).setScale(1.1);
+    this.setUi(this.goldText, sideLeft + 46, 93).setOrigin(0, 0.5);
+    this.setUi(this.diamondIcon, sideLeft + 178, 93).setScale(0.82);
+    this.setUi(this.diamondText, sideLeft + 200, 93).setOrigin(0, 0.5);
+    this.setUi(this.muteBtn, sideRight - 20, 42).setOrigin(0.5);
+
+    this.bossBarMaxWidth = sidebarW - 74;
+    this.setUiRect(this.bossBarBg, sideCenter, 146, this.bossBarMaxWidth + 4, 14);
+    this.bossBar.setPosition(this.layout.x(sideCenter - this.bossBarMaxWidth / 2), 146);
+    this.bossBar.height = 10;
+    this.setUi(this.previewText, sideCenter, 178).setOrigin(0.5);
+
+    this.setUi(this.callBtn, sideCenter, 238);
+    this.setUi(this.buyBtn, sideCenter, 352);
+
+    const sellX = sideLeft + 82;
+    const sellY = 514;
+    this.sellRect = new Phaser.Geom.Rectangle(this.layout.x(sellX - 80), sellY - 65, 160, 130);
+    this.setUiRect(this.sellZone, sellX, sellY, 160, 130);
+    this.setUi(this.sellText, sellX, sellY).setOrigin(0.5);
+    this.setUi(this.giftBtn, sideRight - 90, 490);
+    this.setUi(this.speedBtn, sideRight - 90, 584);
   }
 
   uiText(x, y, str, size = 24, color = '#ffffff') {
@@ -262,10 +395,29 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(1001);
   }
 
+  installAudioLifecycle() {
+    startStageAudio(phaseFor(this.wave));
+    this.input.on('pointerdown', this.unlockSceneAudio, this);
+    this.events.once('shutdown', () => {
+      this.input.off('pointerdown', this.unlockSceneAudio, this);
+      stopStageAudio();
+    });
+  }
+
+  unlockSceneAudio() {
+    unlockAudio();
+    setAudioPhase(phaseFor(this.wave), { immediate: true });
+  }
+
   updateUI() {
     this.waveText.setText(`第 ${this.wave} 波`);
     this.heartText.setText(`❤ ${Math.max(0, this.baseHp)}`);
-    this.goldText.setText(String(Math.floor(this.gold)));
+    if (this.goldRollTween && this.gold < this.displayGold) {
+      this.goldRollTween.stop();
+      this.goldRollTween = null;
+    }
+    if (!this.goldRollTween) this.displayGold = this.gold;
+    this.goldText.setText(String(Math.floor(this.displayGold)));
     this.diamondText.setText(String(this.S.diamonds + this.diamondsRun));
     const cost = towerCost(this.bought);
     if (this.pendingTowerDraft) this.buyBtn.label.setText('点空位\n放 塔');
@@ -504,6 +656,8 @@ export class GameScene extends Phaser.Scene {
     // 阶段色调切换（GDD §2）
     const oldPh = phaseFor(finished), newPh = phaseFor(this.wave);
     if (oldPh !== newPh) {
+      setAudioPhase(newPh, { accent: true });
+      this.playPhaseShiftFx(newPh);
       this.banner(`${newPh.name}降临`);
       const speedMult = nonBossSpeedMult(this.wave);
       if (speedMult > 1) {
@@ -520,6 +674,30 @@ export class GameScene extends Phaser.Scene {
     }
     this.updateUI();
     this.startPrep();
+  }
+
+  playPhaseShiftFx(ph) {
+    const tint = ph.bg || 0xffffff;
+    const wash = this.add.rectangle(W / 2, H / 2, W, H, tint, 0.2).setDepth(2240);
+    this.tweens.add({
+      targets: wash,
+      alpha: 0,
+      duration: 760,
+      ease: 'Quad.Out',
+      onComplete: () => wash.destroy(),
+    });
+
+    const sweep = this.add.rectangle(-90, H / 2, 120, H * 1.45, 0xffffff, 0.16)
+      .setAngle(-14)
+      .setDepth(2241);
+    this.tweens.add({
+      targets: sweep,
+      x: W + 110,
+      alpha: 0,
+      duration: 680,
+      ease: 'Cubic.Out',
+      onComplete: () => sweep.destroy(),
+    });
   }
 
   tintTo(rect, from, to) {
@@ -541,17 +719,20 @@ export class GameScene extends Phaser.Scene {
     // 金币（GDD §4.3）
     const g = Math.max(1, Math.round(waveHp(e.spawnWave) * 0.1 * e.type.goldMult * e.rewardGoldMult * e.killGoldMult * this.waveGoldMult * this.resonanceGoldMult));
     this.gold += g;
+    this.rollGoldTo(this.gold);
     this.burst(e.x, e.y, e.type.color, e.boss ? 40 : 12, e.boss ? 1.6 : 1);
-    this.coinFly(e.x, e.y);
+    this.coinFly(e.x, e.y, g);
     const now = this.time.now;
     if (now - this.lastKillSfx > 90) { Sfx.kill(); this.lastKillSfx = now; }
 
     if (e.boss) {
-      this.diamondsRun += DIAMOND.boss;
-      toast(this, e.x, e.y - 60, `+${DIAMOND.boss}💎`, '#9fe8ff', 34);
+      const rewardDiamonds = DIAMOND.boss;
+      this.diamondsRun += rewardDiamonds;
+      toast(this, e.x, e.y - 72, `+${rewardDiamonds}💎`, '#9fe8ff', 38);
+      this.playBossDeathFx(e.x, e.y, e.type.color, rewardDiamonds);
       Sfx.bossDie();
-      this.cameras.main.shake(400, 0.012);
-      this.slowmoT = 0.25;
+      this.cameras.main.shake(520, 0.018);
+      this.slowmoT = Math.max(this.slowmoT, 0.36);
       this.applyTwinBossHeal(e);
     }
     if (e.elite) {
@@ -680,9 +861,9 @@ export class GameScene extends Phaser.Scene {
     if (silent) return this.buyTowerSilently();
     if (this.evolutionChoiceOpen || this.towerChoiceLayer || this.pendingTowerDraft) return false;
     const cost = towerCost(this.bought);
-    if (this.gold < cost) { if (!silent) toast(this, 360, 1020, '金币不足', '#ff8888', 24); return false; }
+    if (this.gold < cost) { if (!silent) toast(this, this.buyBtn.x, this.buyBtn.y - 135, '金币不足', '#ff8888', 24); return false; }
     const free = this.slots.filter(s => !s.tower);
-    if (!free.length) { if (!silent) toast(this, 360, 1020, '塔位已满，先合成!', '#ff8888', 24); return false; }
+    if (!free.length) { if (!silent) toast(this, this.buyBtn.x, this.buyBtn.y - 135, '塔位已满，先合成!', '#ff8888', 24); return false; }
     const lv = this.rollSpawnLv();
     const choices = this.buildTowerChoices(lv);
     this.showTowerChoices(lv, cost, choices);
@@ -710,35 +891,53 @@ export class GameScene extends Phaser.Scene {
 
   showTowerChoices(lv, cost, choices) {
     this.clearTowerChoiceLayer();
+    this.ensureResponsiveLayout();
+    const wide = this.layout.landscape;
+    const sideCenterScreen = this.layout.fieldAreaW + this.layout.sidebarW / 2;
+    const centerX = wide ? this.layout.x(sideCenterScreen) : W / 2;
+    const panelY = wide ? 350 : 1010;
+    const panelW = wide ? this.layout.sidebarW - 46 : 650;
+    const panelH = wide ? 286 : 160;
+    const titleY = wide ? 214 : 940;
+    const cancelX = wide ? this.layout.x(this.layout.fieldAreaW + this.layout.sidebarW - 66) : 650;
+    const cancelY = titleY;
+
     const layer = this.add.container(0, 0).setDepth(2450);
     this.towerChoiceLayer = layer;
 
-    const blocker = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.001)
+    const blocker = this.add.rectangle(
+      wide ? this.layout.x(this.layout.viewW / 2) : W / 2,
+      wide ? this.layout.viewH / 2 : H / 2,
+      wide ? this.layout.viewW : W,
+      wide ? this.layout.viewH : H,
+      0x000000,
+      0.001,
+    )
       .setInteractive();
-    const panel = this.add.rectangle(W / 2, 1010, 650, 160, 0x171b29, 0.94)
+    const panel = this.add.rectangle(centerX, panelY, panelW, panelH, 0x171b29, 0.94)
       .setStrokeStyle(2, 0x4a5578);
-    const title = this.uiText(W / 2, 940, `选择新塔  Lv${lv}  💰${cost}`, 24, '#ffe97a')
+    const title = this.uiText(centerX, titleY, `选择新塔  Lv${lv}  💰${cost}`, wide ? 22 : 24, '#ffe97a')
       .setOrigin(0.5);
-    const cancel = makeButton(this, 650, 940, 82, 42, '取消', {
+    const cancel = makeButton(this, cancelX, cancelY, 82, 42, '取消', {
       bg: 0x51586e,
       fontSize: 18,
       onClick: () => this.cancelTowerPurchase(),
     });
     layer.add([blocker, panel, title, cancel]);
 
-    const xs = choices.length === 2 ? [260, 460] : [160, 360, 560];
+    const xs = wide ? choices.map(() => centerX) : (choices.length === 2 ? [260, 460] : [160, 360, 560]);
     choices.forEach((elem, i) => {
       const def = ELEMENTS[elem];
       const x = xs[i];
-      const card = this.add.container(x, 1020);
-      const bg = this.add.rectangle(0, 0, 178, 96, 0x23283a, 1)
+      const card = this.add.container(x, wide ? 288 + i * 78 : 1020);
+      const bg = this.add.rectangle(0, 0, wide ? panelW - 54 : 178, wide ? 64 : 96, 0x23283a, 1)
         .setStrokeStyle(3, def.color, 0.9);
-      const glow = this.add.image(-56, -18, 'glow').setTint(def.color).setAlpha(0.34).setScale(0.72);
-      const icon = this.add.image(-56, -12, 'tower_' + elem).setScale(0.62);
-      const name = this.uiText(-18, -22, def.cn, 28, this.hexColor(def.color)).setOrigin(0, 0.5);
-      const desc = this.uiText(-18, 20, def.desc, 18, '#c9d2f0').setOrigin(0, 0.5);
+      const glow = this.add.image(wide ? -118 : -56, wide ? 0 : -18, 'glow').setTint(def.color).setAlpha(0.34).setScale(wide ? 0.6 : 0.72);
+      const icon = this.add.image(wide ? -118 : -56, wide ? 4 : -12, 'tower_' + elem).setScale(wide ? 0.5 : 0.62);
+      const name = this.uiText(wide ? -78 : -18, wide ? -16 : -22, def.cn, wide ? 24 : 28, this.hexColor(def.color)).setOrigin(0, 0.5);
+      const desc = this.uiText(wide ? -78 : -18, wide ? 17 : 20, def.desc, wide ? 16 : 18, '#c9d2f0').setOrigin(0, 0.5);
       card.add([bg, glow, icon, name, desc]);
-      card.setSize(178, 96).setInteractive({ useHandCursor: true });
+      card.setSize(wide ? panelW - 54 : 178, wide ? 64 : 96).setInteractive({ useHandCursor: true });
       card.on('pointerover', () => bg.setFillStyle(0x30364d));
       card.on('pointerout', () => bg.setFillStyle(0x23283a));
       card.on('pointerdown', () => this.beginTowerPlacement(elem, lv, cost));
@@ -748,9 +947,12 @@ export class GameScene extends Phaser.Scene {
 
   beginTowerPlacement(elem, lv, cost) {
     this.clearTowerChoiceLayer();
+    this.ensureResponsiveLayout();
     const branch = lv >= 4 ? this.randomBranch(elem) : null;
     this.pendingTowerDraft = { elem, lv, branch, cost };
-    this.placementHint = this.uiText(W / 2, 905, `点一个空塔位放置 ${ELEMENTS[elem].cn} Lv${lv}`, 26, this.hexColor(ELEMENTS[elem].color))
+    const hintX = this.layout.landscape ? this.layout.x(this.layout.fieldCenterScreen) : W / 2;
+    const hintY = this.layout.landscape ? Math.min(1120, this.layout.viewH - 150) : 905;
+    this.placementHint = this.uiText(hintX, hintY, `点一个空塔位放置 ${ELEMENTS[elem].cn} Lv${lv}`, 26, this.hexColor(ELEMENTS[elem].color))
       .setOrigin(0.5)
       .setDepth(2450);
     this.placementHint.setStroke('#000000', 5);
@@ -781,17 +983,19 @@ export class GameScene extends Phaser.Scene {
 
   tryPlacePendingTower(pointer) {
     if (!this.pendingTowerDraft || this.over || this.dying || this.evolutionChoiceOpen) return false;
+    const px = pointer.worldX ?? pointer.x;
+    const py = pointer.worldY ?? pointer.y;
     let nearest = null, nd = 58;
     for (const s of this.slots) {
       if (s.tower) continue;
-      const d = Phaser.Math.Distance.Between(pointer.x, pointer.y, s.x, s.y);
+      const d = Phaser.Math.Distance.Between(px, py, s.x, s.y);
       if (d < nd) { nd = d; nearest = s; }
     }
     if (!nearest) return false;
 
     const draft = this.pendingTowerDraft;
     if (this.gold < draft.cost) {
-      toast(this, 360, 940, '金币不足', '#ff8888', 24);
+      toast(this, this.buyBtn.x, this.buyBtn.y - 135, '金币不足', '#ff8888', 24);
       this.cancelTowerPurchase();
       return true;
     }
@@ -805,48 +1009,129 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  placeTower(slot, elem, lv, branch = null) {
+  placeTower(slot, elem, lv, branch = null, opts = {}) {
     const t = new Tower(this, slot, elem, lv, branch);
     slot.tower = t;
     this.towers.push(t);
-    t.c.setScale(0);
-    this.tweens.add({ targets: t.c, scale: 1, duration: 240, ease: 'Back.Out' });
-    this.burst(slot.x, slot.y - 20, ELEMENTS[elem].color, 8, 0.7);
+    if (opts.animate !== false) {
+      t.c.setScale(0);
+      this.tweens.add({ targets: t.c, scale: 1, duration: 240, ease: 'Back.Out' });
+      this.burst(slot.x, slot.y - 20, ELEMENTS[elem].color, 8, 0.7);
+    } else {
+      t.c.setScale(opts.scale ?? 1);
+    }
     if (lv > this.highestLv) this.highestLv = lv;
     return t;
   }
 
   doMerge(a, b, opts = {}) {
+    if (a.merging || b.merging) return;
     // b 的位置保留，产出 lv+1
     const slot = b.slot, elem = a.elem, lv = a.lv + 1;
     const branch = this.mergeBranchFor(a, b, lv, opts);
+    const pop = () => {
+      a.destroy(); b.destroy();
+      const t = this.placeTower(slot, elem, lv, branch, { animate: false, scale: 0.22 });
+      t.c.setAlpha(0.85);
+      const resonance = this.registerMergeResonance(t, !!opts.auto);
+      this.playMergePop(t, resonance, !!opts.auto);
+      this.clearHint();
+      // 里程碑质变提示（GDD §3.3）
+      if (lv === 4 || lv === 7) toast(this, slot.x, slot.y - 90, '⭐ 里程碑质变!', '#ffe97a', 26);
+      if (lv === 4 && !opts.auto) this.showEvolutionChoice(t);
+      // 本局最高级：慢镜 + 白闪（GDD §6.2）
+      if (lv > this.highestLv || lv === this.highestLv) {
+        if (lv >= this.highestLv && lv > 2) {
+          this.highestLv = lv;
+          this.slowmoT = 0.3;
+          this.flash.setAlpha(0.55);
+          this.tweens.add({ targets: this.flash, alpha: 0, duration: 450 });
+          Sfx.mergeTop();
+        }
+        this.highestLv = Math.max(this.highestLv, lv);
+      }
+      this.updateUI();
+    };
+
+    a.merging = true;
+    b.merging = true;
+    a.dragging = false;
+    b.dragging = false;
+    a.c.disableInteractive();
+    b.c.disableInteractive();
     a.slot.tower = null; slot.tower = null;
     this.towers = this.towers.filter(t => t !== a && t !== b);
-    a.destroy(); b.destroy();
-    const t = this.placeTower(slot, elem, lv, branch);
-    const resonance = this.registerMergeResonance(t, !!opts.auto);
-    // —— 合成爆点（GDD §6.1）——
-    t.c.setScale(1.45);
-    this.tweens.add({ targets: t.c, scale: 1, duration: 300, ease: 'Bounce.Out' });
-    this.burst(slot.x, slot.y - 24, ELEMENTS[elem].color, 18, 1.1);
-    Sfx.merge(lv, resonance.chain);
-    this.triggerMergeSurge(t, resonance.multiplier, resonance.chain, !!opts.auto);
-    this.clearHint();
-    // 里程碑质变提示（GDD §3.3）
-    if (lv === 4 || lv === 7) toast(this, slot.x, slot.y - 90, '⭐ 里程碑质变!', '#ffe97a', 26);
-    if (lv === 4 && !opts.auto) this.showEvolutionChoice(t);
-    // 本局最高级：慢镜 + 白闪（GDD §6.2）
-    if (lv > this.highestLv || lv === this.highestLv) {
-      if (lv >= this.highestLv && lv > 2) {
-        this.highestLv = lv;
-        this.slowmoT = 0.3;
-        this.flash.setAlpha(0.55);
-        this.tweens.add({ targets: this.flash, alpha: 0, duration: 450 });
-        Sfx.mergeTop();
-      }
-      this.highestLv = Math.max(this.highestLv, lv);
-    }
+
+    this.playMergeAbsorb(a, b, slot, elem, pop);
     this.updateUI();
+  }
+
+  playMergeAbsorb(a, b, slot, elem, onComplete) {
+    const tx = slot.x;
+    const ty = slot.y - 8;
+    const color = ELEMENTS[elem].color;
+    this.tweens.killTweensOf([a.c, b.c, a.spr, b.spr]);
+    a.c.setDepth(2700);
+    b.c.setDepth(2701);
+
+    const pullGlow = this.add.image(tx, ty - 18, 'glow')
+      .setTint(color)
+      .setAlpha(0.25)
+      .setScale(0.35)
+      .setDepth(2698);
+    this.tweens.add({
+      targets: pullGlow,
+      scale: 1.05,
+      alpha: 0,
+      duration: 170,
+      ease: 'Cubic.Out',
+      onComplete: () => pullGlow.destroy(),
+    });
+
+    this.tweens.add({
+      targets: [a.c, b.c],
+      x: tx,
+      y: ty,
+      scaleX: 1.16,
+      scaleY: 0.72,
+      angle: 0,
+      duration: 115,
+      ease: 'Quad.In',
+      onComplete,
+    });
+  }
+
+  playMergePop(t, resonance, auto) {
+    const color = t.color;
+    const x = t.slot.x;
+    const y = t.slot.y - 24;
+    // —— 合成爆点（GDD §6.1）——
+    t.c.setDepth(t.slot.y + 220);
+    this.mergeBurst(x, y, color, t.lv);
+    Sfx.merge(t.lv, resonance.chain);
+    this.tweens.add({
+      targets: t.c,
+      scaleX: 1.46,
+      scaleY: 1.46,
+      alpha: 1,
+      duration: 105,
+      ease: 'Back.Out',
+      onComplete: () => {
+        this.tweens.add({
+          targets: t.c,
+          scaleX: 0.92,
+          scaleY: 1.08,
+          duration: 70,
+          ease: 'Quad.InOut',
+          yoyo: true,
+          onComplete: () => {
+            t.c.setDepth(t.slot.y);
+            this.tweens.add({ targets: t.c, scaleX: 1, scaleY: 1, duration: 95, ease: 'Back.Out' });
+          },
+        });
+      },
+    });
+    this.triggerMergeSurge(t, resonance.multiplier, resonance.chain, auto);
   }
 
   mergeBranchFor(a, b, lv, opts = {}) {
@@ -1203,7 +1488,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   screenGlow(color, alpha) {
-    const glow = this.add.rectangle(W / 2, H / 2, W, H, color, alpha).setDepth(2940);
+    this.ensureResponsiveLayout();
+    const glow = this.add.rectangle(
+      this.layout.x(this.layout.viewW / 2),
+      this.layout.viewH / 2,
+      this.layout.viewW,
+      this.layout.viewH,
+      color,
+      alpha,
+    ).setDepth(2940);
     this.tweens.add({ targets: glow, alpha: 0, duration: 520, onComplete: () => glow.destroy() });
   }
 
@@ -1219,14 +1512,14 @@ export class GameScene extends Phaser.Scene {
     this.burst(t.slot.x, t.slot.y - 20, 0xff9aa8, 10, 0.8);
     t.destroy();
     Sfx.sell();
-    toast(this, 110, 1000, `+${refund}💰`, '#ffd34e', 26);
+    toast(this, this.sellZone.x, this.sellZone.y - 110, `+${refund}💰`, '#ffd34e', 26);
     this.updateUI();
   }
 
   async adGiftTower() {
     if (this.adGifts >= 2) return;
     const free = this.slots.filter(s => !s.tower);
-    if (!free.length) { toast(this, 610, 980, '塔位已满', '#ff8888', 22); return; }
+    if (!free.length) { toast(this, this.giftBtn.x, this.giftBtn.y - 84, '塔位已满', '#ff8888', 22); return; }
     const ok = await Poki.rewardedBreak();
     if (!ok) return;
     this.adGifts++;
@@ -1259,11 +1552,23 @@ export class GameScene extends Phaser.Scene {
     if (best) this.doMerge(best[0], best[1], { auto: true });
   }
 
-  toggleSpeed() {
+  updateSpeedButton() {
+    if (!this.speedBtn) return;
+    this.speedBtn.label.setText(this.runSpeedUnlocked ? `▶ x${this.speedMult}` : '📺 x2');
+  }
+
+  async toggleSpeed() {
+    if (!this.runSpeedUnlocked) {
+      const ok = await Poki.rewardedBreak();
+      if (!ok) return;
+      this.runSpeedUnlocked = true;
+      toast(this, this.speedBtn.x, this.speedBtn.y - 70, '本局 2 倍速解锁', '#9fe8ff', 22);
+      this.speedMult = 1;
+    }
     this.speedMult = this.speedMult === 1 ? 2 : 1;
     this.time.timeScale = this.speedMult;
     this.tweens.timeScale = this.speedMult;
-    this.speedBtn.label.setText(`▶ x${this.speedMult}`);
+    this.updateSpeedButton();
   }
 
   // ================= 拖拽 =================
@@ -1278,6 +1583,7 @@ export class GameScene extends Phaser.Scene {
       const t = obj.towerRef;
       if (!t || this.over || this.evolutionChoiceOpen || this.pendingTowerDraft) return;
       t.dragging = true;
+      t.setDraggingVisual(true);
       obj.setDepth(2600);
       this.rangeCircle.setPosition(t.slot.x, t.slot.y).setRadius(t.range).setVisible(true);
       this.sellZone.setStrokeStyle(3, 0xff6b7d).setScale(1.06);
@@ -1290,13 +1596,14 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on('drag', (pointer, obj, dragX, dragY) => {
       if (!obj.towerRef) return;
-      obj.setPosition(dragX, dragY);
+      obj.setPosition(pointer.worldX ?? dragX, pointer.worldY ?? dragY);
     });
 
     this.input.on('dragend', (pointer, obj) => {
       const t = obj.towerRef;
       if (!t) return;
       t.dragging = false;
+      t.setDraggingVisual(false);
       this.rangeCircle.setVisible(false);
       this.sellZone.setStrokeStyle(2, 0x9c4a58).setScale(1);
       this.showFreeSlots(false);
@@ -1536,6 +1843,128 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ================= 特效工具 =================
+  mergeBurst(x, y, color, lv = 1) {
+    const count = Phaser.Math.Clamp(18 + lv * 3, 22, 40);
+    const p = this.add.particles(x, y, 'spark', {
+      angle: { min: 0, max: 360 },
+      speed: { min: 150, max: 280 },
+      scale: { start: 1.05, end: 0 },
+      lifespan: 460,
+      tint: color,
+      emitting: false,
+    }).setDepth(2350);
+    p.explode(count);
+    this.time.delayedCall(720, () => p.destroy());
+
+    const ring = this.add.circle(x, y, 24, color, 0)
+      .setStrokeStyle(5, color, 0.82)
+      .setDepth(2348);
+    this.tweens.add({
+      targets: ring,
+      scale: 2.4,
+      alpha: 0,
+      duration: 340,
+      ease: 'Cubic.Out',
+      onComplete: () => ring.destroy(),
+    });
+
+    const core = this.add.image(x, y, 'glow')
+      .setTint(color)
+      .setAlpha(0.42)
+      .setScale(0.75)
+      .setDepth(2347);
+    this.tweens.add({
+      targets: core,
+      scale: 1.7,
+      alpha: 0,
+      duration: 260,
+      ease: 'Quad.Out',
+      onComplete: () => core.destroy(),
+    });
+  }
+
+  playBossDeathFx(x, y, color, rewardDiamonds = 0) {
+    const flash = this.add.rectangle(W / 2, H / 2, W, H, 0x9fe8ff, 0.24)
+      .setDepth(2942);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 360,
+      ease: 'Quad.Out',
+      onComplete: () => flash.destroy(),
+    });
+
+    const core = this.add.image(x, y, 'glow')
+      .setTint(color)
+      .setAlpha(0.72)
+      .setScale(1.1)
+      .setDepth(2338);
+    this.tweens.add({
+      targets: core,
+      scale: 2.6,
+      alpha: 0,
+      duration: 280,
+      ease: 'Cubic.Out',
+      onComplete: () => core.destroy(),
+    });
+
+    const firstRing = this.add.circle(x, y, 34, color, 0)
+      .setStrokeStyle(8, color, 0.86)
+      .setDepth(2340);
+    this.tweens.add({
+      targets: firstRing,
+      scale: 2.8,
+      alpha: 0,
+      duration: 300,
+      ease: 'Cubic.Out',
+      onComplete: () => firstRing.destroy(),
+    });
+
+    const shards = this.add.particles(x, y, 'spark', {
+      angle: { min: 0, max: 360 },
+      speed: { min: 230, max: 420 },
+      scale: { start: 1.4, end: 0 },
+      lifespan: 620,
+      tint: color,
+      emitting: false,
+    }).setDepth(2344);
+    shards.explode(56);
+    this.time.delayedCall(820, () => shards.destroy());
+
+    this.time.delayedCall(120, () => {
+      this.cameras.main.shake(280, 0.015);
+      this.burst(x, y, 0xffffff, 36, 2.1);
+      this.burst(x, y, color, 48, 2.0);
+
+      const secondRing = this.add.circle(x, y, 48, 0x9fe8ff, 0)
+        .setStrokeStyle(10, 0x9fe8ff, 0.78)
+        .setDepth(2346);
+      this.tweens.add({
+        targets: secondRing,
+        scale: 3.6,
+        alpha: 0,
+        duration: 420,
+        ease: 'Cubic.Out',
+        onComplete: () => secondRing.destroy(),
+      });
+
+      const plume = this.add.particles(x, y - 10, 'spark', {
+        angle: { min: 205, max: 335 },
+        speed: { min: 190, max: 360 },
+        gravityY: 360,
+        scale: { start: 1.2, end: 0 },
+        lifespan: 700,
+        tint: 0x9fe8ff,
+        emitting: false,
+      }).setDepth(2347);
+      plume.explode(44);
+      this.time.delayedCall(900, () => plume.destroy());
+
+      this.diamondFountain(x, y - 8, rewardDiamonds);
+      Sfx.diamond();
+    });
+  }
+
   burst(x, y, color, n = 12, scale = 1) {
     const p = this.add.particles(x, y, 'spark', {
       speed: { min: 60, max: 260 }, scale: { start: 0.85 * scale, end: 0 },
@@ -1558,13 +1987,118 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  coinFly(x, y) {
+  diamondFountain(x, y, rewardDiamonds = 0) {
+    const targetX = this.diamondIcon?.x ?? 516;
+    const targetY = this.diamondIcon?.y ?? 30;
+    const count = Math.max(6, rewardDiamonds * 3);
+    for (let i = 0; i < count; i++) {
+      const d = this.add.image(x, y, 'diamond')
+        .setDepth(2425 + i)
+        .setScale(0.55 + Math.random() * 0.18)
+        .setAngle(Phaser.Math.Between(-25, 25));
+      const angle = Phaser.Math.Between(210, 330) * Math.PI / 180;
+      const dist = Phaser.Math.Between(62, 150);
+      const apexX = x + Math.cos(angle) * dist;
+      const apexY = y + Math.sin(angle) * dist - Phaser.Math.Between(18, 70);
+      this.tweens.add({
+        targets: d,
+        x: apexX,
+        y: apexY,
+        scale: d.scaleX + 0.3,
+        angle: d.angle + Phaser.Math.Between(-120, 120),
+        duration: 190 + i * 10,
+        ease: 'Cubic.Out',
+        onComplete: () => {
+          this.tweens.add({
+            targets: d,
+            x: targetX + Phaser.Math.Between(-8, 8),
+            y: targetY + Phaser.Math.Between(-5, 5),
+            scale: 0.42,
+            angle: d.angle + Phaser.Math.Between(180, 420),
+            alpha: 0.78,
+            delay: i * 24,
+            duration: 430 + Phaser.Math.Between(0, 130),
+            ease: 'Cubic.In',
+            onComplete: () => {
+              d.destroy();
+              if (i === count - 1) this.popDiamondText();
+            },
+          });
+        },
+      });
+    }
+  }
+
+  popDiamondText() {
+    this.tweens.killTweensOf(this.diamondText);
+    this.diamondText.setScale(1);
+    this.tweens.add({
+      targets: this.diamondText,
+      scale: 1.28,
+      duration: 95,
+      ease: 'Quad.Out',
+      yoyo: true,
+    });
+  }
+
+  rollGoldTo(targetGold) {
+    const from = this.displayGold ?? targetGold;
+    if (this.goldRollTween) this.goldRollTween.stop();
+    this.goldRollTween = this.tweens.addCounter({
+      from,
+      to: targetGold,
+      duration: 360,
+      ease: 'Cubic.Out',
+      onUpdate: tw => {
+        this.displayGold = tw.getValue();
+        this.goldText.setText(String(Math.floor(this.displayGold)));
+      },
+      onComplete: () => {
+        this.displayGold = targetGold;
+        this.goldRollTween = null;
+        this.goldText.setText(String(Math.floor(this.displayGold)));
+      },
+    });
+    this.tweens.killTweensOf(this.goldText);
+    this.goldText.setScale(1);
+    this.tweens.add({
+      targets: this.goldText,
+      scale: 1.18,
+      duration: 90,
+      ease: 'Quad.Out',
+      yoyo: true,
+    });
+  }
+
+  coinFly(x, y, amount = 0) {
     if (this.coinCount > 7) return;
+    const targetX = this.coinIcon?.x ?? 332;
+    const targetY = this.coinIcon?.y ?? 30;
     this.coinCount++;
     const c = this.add.image(x, y, 'coin').setDepth(2400);
+    const label = amount > 0
+      ? this.add.text(x + 18, y - 18, `+${amount}`, {
+        fontFamily: 'Arial Black, sans-serif',
+        fontSize: '22px',
+        color: '#ffd34e',
+        stroke: '#000000',
+        strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(2401)
+      : null;
+    const targets = label ? [c, label] : [c];
     this.tweens.add({
-      targets: c, x: 340, y: 30, scale: 0.7, duration: 480, ease: 'Cubic.In',
-      onComplete: () => { c.destroy(); this.coinCount--; Sfx.coin(); },
+      targets,
+      x: targetX + 8,
+      y: targetY,
+      scale: 0.7,
+      duration: 480,
+      ease: 'Cubic.In',
+      onComplete: () => {
+        c.destroy();
+        if (label) label.destroy();
+        this.coinCount--;
+        Sfx.coin();
+      },
     });
   }
 
@@ -1803,6 +2337,7 @@ export class GameScene extends Phaser.Scene {
   async endRun() {
     if (this.over) return;
     this.over = true;
+    stopStageAudio();
     Poki.gameplayStop();
     const S = this.S;
     const diagnosis = this.buildDeathAnalysis(S);
@@ -1823,6 +2358,7 @@ export class GameScene extends Phaser.Scene {
 
   // ================= 主循环 =================
   update(time, delta) {
+    this.ensureResponsiveLayout();
     if (this.over) return;
     let dts = (delta / 1000) * this.speedMult;
     if (this.lastStandActive) this.updateLastStand(delta / 1000);
@@ -1875,7 +2411,7 @@ export class GameScene extends Phaser.Scene {
     if (bosses.length) {
       const ratio = bosses.reduce((s, b) => s + Math.max(0, b.hp), 0) / bosses.reduce((s, b) => s + b.maxHp, 0);
       this.bossBarBg.setVisible(true);
-      this.bossBar.setVisible(true).width = 600 * ratio;
+      this.bossBar.setVisible(true).width = (this.bossBarMaxWidth || 600) * ratio;
     } else {
       this.bossBarBg.setVisible(false);
       this.bossBar.setVisible(false);

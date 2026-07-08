@@ -12,25 +12,34 @@ export class Tower {
     this.selfBuffT = 0;
 
     const e = ELEMENTS[elem];
+    this.shadow = scene.add.ellipse(0, 17, 68, 20, 0x000000, 0.24)
+      .setAlpha(0)
+      .setVisible(false);
+    this.highlightGlow = scene.add.image(0, -22, 'glow')
+      .setTint(e.color)
+      .setAlpha(0)
+      .setScale(1.05)
+      .setVisible(false);
     this.spr = scene.add.image(0, -22, 'tower_' + elem).setScale(0.85 + lv * 0.07);
     this.badge = scene.add.circle(20, 8, 13, 0x1c1f2e, 0.92).setStrokeStyle(2, e.color);
     this.lvText = scene.add.text(20, 8, String(lv), {
       fontFamily: 'Arial Black, sans-serif', fontSize: '16px', color: '#ffffff',
     }).setOrigin(0.5);
-    const children = [this.spr, this.badge, this.lvText];
+    const children = [this.shadow, this.highlightGlow];
     if (lv >= 4) {
       this.branchBadge = scene.add.circle(-22, 8, 13, 0x1c1f2e, this.branch ? 0.92 : 0.72).setStrokeStyle(2, e.color);
       this.branchText = scene.add.text(-22, 8, this.branchLabel(), {
         fontFamily: 'Arial Black, sans-serif', fontSize: '15px', color: this.branch ? '#ffffff' : '#ffe97a',
       }).setOrigin(0.5);
-      children.push(this.branchBadge, this.branchText);
     }
     // Lv8 常驻光环
     if (lv >= MAX_LV) {
       this.aura = scene.add.image(0, -20, 'glow').setScale(2.6).setTint(e.color).setAlpha(0.8);
-      children.unshift(this.aura);
+      children.push(this.aura);
       scene.tweens.add({ targets: this.aura, scale: 3.1, alpha: 0.5, duration: 800, yoyo: true, repeat: -1 });
     }
+    children.push(this.spr, this.badge, this.lvText);
+    if (lv >= 4) children.push(this.branchBadge, this.branchText);
     this.c = scene.add.container(slot.x, slot.y - 8, children);
     this.c.setDepth(slot.y);
     this.c.setSize(96, 100);
@@ -75,17 +84,105 @@ export class Tower {
   }
 
   setHighlight(on) {
-    if (on) this.spr.setTint(0xffffff);
-    else this.spr.clearTint();
+    this.scene.tweens.killTweensOf(this.highlightGlow);
+    if (on) {
+      this.spr.setTint(0xffffff);
+      this.highlightGlow
+        .setVisible(true)
+        .setScale(1.12)
+        .setAlpha(0.24);
+      this.highlightTween = this.scene.tweens.add({
+        targets: this.highlightGlow,
+        scale: 1.62,
+        alpha: 0.52,
+        duration: 520,
+        ease: 'Sine.InOut',
+        yoyo: true,
+        repeat: -1,
+      });
+    } else {
+      this.spr.clearTint();
+      if (this.highlightTween) {
+        this.highlightTween.stop();
+        this.highlightTween = null;
+      }
+      this.highlightGlow
+        .setAlpha(0)
+        .setScale(1.05)
+        .setVisible(false);
+    }
   }
 
-  moveTo(slot) {
+  setDraggingVisual(on) {
+    this.scene.tweens.killTweensOf([this.c, this.shadow]);
+    if (on) {
+      this.shadow
+        .setVisible(true)
+        .setAlpha(0)
+        .setScale(0.85);
+      this.scene.tweens.add({
+        targets: this.c,
+        scaleX: 1.15,
+        scaleY: 1.15,
+        duration: 100,
+        ease: 'Back.Out',
+      });
+      this.scene.tweens.add({
+        targets: this.shadow,
+        alpha: 0.34,
+        scaleX: 1.18,
+        scaleY: 1,
+        duration: 100,
+        ease: 'Quad.Out',
+      });
+    } else {
+      this.scene.tweens.add({
+        targets: this.c,
+        scaleX: 1,
+        scaleY: 1,
+        duration: 120,
+        ease: 'Quad.Out',
+      });
+      this.scene.tweens.add({
+        targets: this.shadow,
+        alpha: 0,
+        scaleX: 0.85,
+        scaleY: 0.85,
+        duration: 110,
+        ease: 'Quad.Out',
+        onComplete: () => this.shadow.setVisible(false),
+      });
+    }
+  }
+
+  moveTo(slot, opts = {}) {
     this.slot = slot;
-    this.c.setPosition(slot.x, slot.y - 8);
-    this.c.setDepth(slot.y);
+    this.scene.tweens.killTweensOf(this.c);
+    const x = slot.x;
+    const y = slot.y - 8;
+    if (opts.animate === false) {
+      this.c.setPosition(x, y);
+      this.c.setScale(1);
+      this.c.setDepth(slot.y);
+      return;
+    }
+    this.c.setDepth(slot.y + 180);
+    this.scene.tweens.add({
+      targets: this.c,
+      x,
+      y,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 140,
+      ease: 'Back.Out',
+      onComplete: () => {
+        this.c.setDepth(slot.y);
+      },
+    });
   }
 
   destroy() {
+    this.scene.tweens.killTweensOf([this.c, this.spr, this.shadow, this.highlightGlow, this.aura].filter(Boolean));
     this.c.destroy();
   }
 }

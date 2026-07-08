@@ -1,4 +1,6 @@
 // Poki SDK 包装层：SDK 存在时走真实调用，否则 no-op（本地开发）
+import { setAudioPaused } from './audio.js';
+
 const sdk = () => (typeof window !== 'undefined' && window.PokiSDK) ? window.PokiSDK : null;
 
 export const Poki = {
@@ -14,12 +16,16 @@ export const Poki = {
   async commercialBreak() {
     const s = sdk();
     if (!s) return;
+    setAudioPaused(true, 'poki');
     try { await s.commercialBreak(); } catch (e) {}
+    finally { setAudioPaused(false, 'poki'); }
   },
   // 激励视频：返回 true=看完发奖励。本地开发始终返回 true 便于测试。
   async rewardedBreak() {
     const s = sdk();
     if (!s) return true;
+    setAudioPaused(true, 'poki');
     try { return await s.rewardedBreak(); } catch (e) { return false; }
+    finally { setAudioPaused(false, 'poki'); }
   },
 };

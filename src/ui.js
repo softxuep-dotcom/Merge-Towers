@@ -1,7 +1,7 @@
 // 通用 UI 组件
 import { UPGRADES, DIAMOND } from './config.js';
 import { tier, writeSave } from './save.js';
-import { Sfx } from './audio.js';
+import { Sfx, unlockAudio } from './audio.js';
 import { Poki } from './poki.js';
 
 export function makeButton(scene, x, y, w, h, label, opts = {}) {
@@ -22,6 +22,7 @@ export function makeButton(scene, x, y, w, h, label, opts = {}) {
   c.on('pointerover', () => bg.setFillStyle(Phaser.Display.Color.IntegerToColor(bgColor).brighten(12).color));
   c.on('pointerout', () => bg.setFillStyle(bgColor));
   c.on('pointerdown', () => {
+    unlockAudio();
     scene.tweens.add({ targets: c, scale: 0.94, duration: 50, yoyo: true });
     if (opts.onClick) opts.onClick();
   });

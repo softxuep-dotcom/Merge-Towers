@@ -3,7 +3,7 @@ import { BootScene } from './scenes/BootScene.js';
 import { MenuScene } from './scenes/MenuScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { ResultScene } from './scenes/ResultScene.js';
-import { writeSave } from './save.js';
+import { touchSave } from './save.js';
 import { isMuted } from './audio.js';
 
 const game = window.__game = new Phaser.Game({
@@ -13,20 +13,20 @@ const game = window.__game = new Phaser.Game({
   height: H,
   backgroundColor: '#12131f',
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.EXPAND,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   scene: [BootScene, MenuScene, GameScene, ResultScene],
 });
 
 // 离开页面时记录离线时间戳（离线钻石结算依据）
+function persistSessionExit() {
+  const s = game.registry.get('save');
+  if (s) touchSave(s, { muted: isMuted() });
+}
+
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    const s = game.registry.get('save');
-    if (s) {
-      s.lastSeen = Date.now();
-      s.muted = isMuted();
-      writeSave(s);
-    }
-  }
+  if (document.hidden) persistSessionExit();
 });
+window.addEventListener('pagehide', persistSessionExit);
+window.addEventListener('beforeunload', persistSessionExit);

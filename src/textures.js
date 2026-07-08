@@ -1,113 +1,313 @@
-// 程序化生成全部贴图：伪 2.5D 风格，零图片资源
+// Lightweight procedural 2.5D sprites aligned with the forest reference art.
+// Keeps M4 package size tiny while the final hand-painted atlas is still absent.
 import { ELEMENTS, ENEMY_TYPES } from './config.js';
 
 function shade(color, f) {
   const c = Phaser.Display.Color.IntegerToColor(color);
-  const r = Math.min(255, Math.round(c.red * f)), g = Math.min(255, Math.round(c.green * f)), b = Math.min(255, Math.round(c.blue * f));
+  const r = Math.min(255, Math.round(c.red * f));
+  const g = Math.min(255, Math.round(c.green * f));
+  const b = Math.min(255, Math.round(c.blue * f));
   return Phaser.Display.Color.GetColor(r, g, b);
+}
+
+function mix(color, toward, amount) {
+  const a = Phaser.Display.Color.IntegerToColor(color);
+  const b = Phaser.Display.Color.IntegerToColor(toward);
+  return Phaser.Display.Color.GetColor(
+    Math.round(a.red + (b.red - a.red) * amount),
+    Math.round(a.green + (b.green - a.green) * amount),
+    Math.round(a.blue + (b.blue - a.blue) * amount),
+  );
+}
+
+function p(points) {
+  return points.map(([x, y]) => ({ x, y }));
+}
+
+function drawOct(g, cx, cy, rx, ry, color, alpha = 1, ox = 0, oy = 0) {
+  g.fillStyle(color, alpha);
+  g.fillPoints(p([
+    [cx - rx * 0.55 + ox, cy - ry + oy],
+    [cx + rx * 0.55 + ox, cy - ry + oy],
+    [cx + rx + ox, cy - ry * 0.38 + oy],
+    [cx + rx + ox, cy + ry * 0.38 + oy],
+    [cx + rx * 0.55 + ox, cy + ry + oy],
+    [cx - rx * 0.55 + ox, cy + ry + oy],
+    [cx - rx + ox, cy + ry * 0.38 + oy],
+    [cx - rx + ox, cy - ry * 0.38 + oy],
+  ]), true);
+}
+
+function strokeOct(g, cx, cy, rx, ry, color, alpha = 1) {
+  g.lineStyle(2, color, alpha);
+  g.strokePoints(p([
+    [cx - rx * 0.55, cy - ry],
+    [cx + rx * 0.55, cy - ry],
+    [cx + rx, cy - ry * 0.38],
+    [cx + rx, cy + ry * 0.38],
+    [cx + rx * 0.55, cy + ry],
+    [cx - rx * 0.55, cy + ry],
+    [cx - rx, cy + ry * 0.38],
+    [cx - rx, cy - ry * 0.38],
+  ]), true, true);
+}
+
+function drawStoneBase(g, cx, cy, scale = 1, accent = 0x4fc3ff) {
+  const rx = 34 * scale;
+  const ry = 18 * scale;
+  g.fillStyle(0x000000, 0.22);
+  g.fillEllipse(cx, cy + 16 * scale, rx * 1.7, ry * 0.9);
+
+  drawOct(g, cx, cy + 8 * scale, rx, ry, 0x242a32);
+  drawOct(g, cx, cy + 2 * scale, rx, ry, 0x575e60);
+  strokeOct(g, cx, cy + 2 * scale, rx, ry, 0x1a1e24, 0.55);
+
+  drawOct(g, cx, cy - 3 * scale, rx * 0.78, ry * 0.72, 0x9a947c);
+  drawOct(g, cx, cy - 6 * scale, rx * 0.66, ry * 0.58, 0xbeb58e);
+  strokeOct(g, cx, cy - 6 * scale, rx * 0.66, ry * 0.58, 0x5b5646, 0.65);
+
+  g.fillStyle(shade(accent, 0.7), 0.95);
+  g.fillRoundedRect(cx - 19 * scale, cy + 3 * scale, 38 * scale, 12 * scale, 4 * scale);
+  g.fillStyle(shade(accent, 1.12), 0.85);
+  g.fillRoundedRect(cx - 14 * scale, cy + 1 * scale, 28 * scale, 6 * scale, 3 * scale);
+}
+
+function drawCrystal(g, cx, top, h, half, color) {
+  const yMid = top + h * 0.54;
+  const bottom = top + h;
+  const bright = mix(shade(color, 1.25), 0xffffff, 0.12);
+  const mid = shade(color, 0.98);
+  const dark = shade(color, 0.58);
+
+  g.fillStyle(dark, 1);
+  g.fillPoints(p([[cx, top], [cx + half, top + h * 0.3], [cx + half * 0.72, bottom], [cx, bottom - 4]]), true);
+  g.fillStyle(mid, 1);
+  g.fillPoints(p([[cx, top], [cx, bottom - 4], [cx - half * 0.72, bottom], [cx - half, top + h * 0.3]]), true);
+  g.fillStyle(bright, 1);
+  g.fillPoints(p([[cx, top + 5], [cx - half * 0.42, top + h * 0.34], [cx - 3, yMid], [cx, bottom - 8]]), true);
+  g.fillStyle(0xffffff, 0.48);
+  g.fillPoints(p([[cx - 5, top + 8], [cx - 8, top + h * 0.38], [cx - 2, top + h * 0.5], [cx - 1, top + 16]]), true);
+
+  g.lineStyle(2, shade(color, 0.42), 0.5);
+  g.strokePoints(p([[cx, top], [cx + half, top + h * 0.3], [cx + half * 0.72, bottom], [cx, bottom - 4], [cx - half * 0.72, bottom], [cx - half, top + h * 0.3]]), true, true);
+}
+
+function drawElementMark(g, key, cx, cy, color) {
+  g.fillStyle(0x10141c, 0.74);
+  g.fillCircle(cx, cy, 10);
+  g.lineStyle(2, shade(color, 1.12), 0.9);
+  g.strokeCircle(cx, cy, 10);
+
+  g.fillStyle(shade(color, 1.25), 1);
+  if (key === 'fire') {
+    g.fillPoints(p([[cx, cy - 8], [cx + 6, cy + 3], [cx, cy + 8], [cx - 7, cy + 3]]), true);
+    g.fillStyle(0xfff0a0, 0.9);
+    g.fillTriangle(cx, cy - 3, cx + 3, cy + 4, cx - 3, cy + 5);
+  } else if (key === 'ice') {
+    g.lineStyle(2, shade(color, 1.35), 1);
+    g.lineBetween(cx - 7, cy, cx + 7, cy);
+    g.lineBetween(cx, cy - 7, cx, cy + 7);
+    g.lineBetween(cx - 5, cy - 5, cx + 5, cy + 5);
+    g.lineBetween(cx + 5, cy - 5, cx - 5, cy + 5);
+  } else if (key === 'lightning') {
+    g.fillPoints(p([[cx + 1, cy - 8], [cx - 6, cy + 1], [cx, cy + 1], [cx - 2, cy + 8], [cx + 7, cy - 2], [cx + 1, cy - 2]]), true);
+  } else if (key === 'poison') {
+    g.fillCircle(cx, cy - 2, 6);
+    g.fillStyle(0x10141c, 1);
+    g.fillCircle(cx - 2.6, cy - 3, 1.8);
+    g.fillCircle(cx + 2.6, cy - 3, 1.8);
+    g.fillRect(cx - 4, cy + 3, 8, 2);
+  } else {
+    g.fillCircle(cx, cy, 5);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      g.fillTriangle(
+        cx + Math.cos(a) * 7, cy + Math.sin(a) * 7,
+        cx + Math.cos(a + 0.18) * 4, cy + Math.sin(a + 0.18) * 4,
+        cx + Math.cos(a - 0.18) * 4, cy + Math.sin(a - 0.18) * 4,
+      );
+    }
+  }
+}
+
+function drawTower(g, key, e) {
+  const cx = 42;
+  drawStoneBase(g, cx, 78, 1, e.color);
+
+  g.fillStyle(shade(e.color, 0.42), 0.8);
+  g.fillRoundedRect(cx - 15, 52, 30, 28, 5);
+  g.fillStyle(shade(e.color, 0.82), 0.95);
+  g.fillRoundedRect(cx - 11, 48, 22, 29, 4);
+
+  drawCrystal(g, cx, 8, 58, 18, e.color);
+  g.fillStyle(0xffffff, 0.14);
+  g.fillCircle(cx - 12, 20, 11);
+  drawElementMark(g, key, cx, 72, e.color);
+
+  g.generateTexture('tower_' + key, 84, 106);
+}
+
+function drawSlime(g, cx, cy, s, color, eyes = true) {
+  g.fillStyle(shade(color, 0.42), 1);
+  g.fillEllipse(cx, cy + s * 0.42, s * 2.05, s * 0.96);
+  g.fillStyle(shade(color, 0.9), 1);
+  g.fillEllipse(cx, cy + s * 0.1, s * 1.92, s * 1.55);
+  g.fillStyle(shade(color, 1.18), 1);
+  g.fillEllipse(cx - s * 0.3, cy - s * 0.28, s * 0.72, s * 0.46);
+  g.fillStyle(0xffffff, 0.3);
+  g.fillEllipse(cx - s * 0.42, cy - s * 0.18, s * 0.28, s * 0.18);
+  if (eyes) {
+    g.fillStyle(0x172019, 1);
+    g.fillCircle(cx - s * 0.32, cy + s * 0.05, Math.max(2.5, s * 0.12));
+    g.fillCircle(cx + s * 0.32, cy + s * 0.05, Math.max(2.5, s * 0.12));
+  }
+}
+
+function drawGolem(g, cx, cy, s, color, boss = false) {
+  const stone = shade(color, boss ? 0.82 : 0.92);
+  const dark = shade(color, 0.45);
+  const moss = boss ? 0x9ee35b : 0x76865f;
+  g.fillStyle(dark, 1);
+  g.fillRoundedRect(cx - s * 1.1, cy - s * 0.06, s * 0.56, s * 0.84, 5);
+  g.fillRoundedRect(cx + s * 0.54, cy - s * 0.06, s * 0.56, s * 0.84, 5);
+  g.fillStyle(stone, 1);
+  g.fillRoundedRect(cx - s * 0.78, cy - s * 0.72, s * 1.56, s * 1.4, 8);
+  g.fillStyle(shade(color, 1.1), 1);
+  g.fillRoundedRect(cx - s * 0.52, cy - s * 1.04, s * 1.04, s * 0.68, 7);
+  g.fillStyle(0x10141c, 1);
+  g.fillCircle(cx - s * 0.24, cy - s * 0.78, Math.max(3, s * 0.11));
+  g.fillCircle(cx + s * 0.24, cy - s * 0.78, Math.max(3, s * 0.11));
+  g.fillStyle(moss, 0.78);
+  g.fillRoundedRect(cx - s * 0.42, cy - s * 0.22, s * 0.84, s * 0.18, 3);
+  g.lineStyle(2, dark, 0.55);
+  g.strokeRoundedRect(cx - s * 0.78, cy - s * 0.72, s * 1.56, s * 1.4, 8);
+  if (boss) {
+    g.fillStyle(0xfff18a, 0.95);
+    g.fillCircle(cx - s * 0.24, cy - s * 0.78, Math.max(2, s * 0.07));
+    g.fillCircle(cx + s * 0.24, cy - s * 0.78, Math.max(2, s * 0.07));
+  }
+}
+
+function drawEnemy(g, key, t) {
+  const s = t.size;
+  const c = t.color;
+  const cx = s + 8;
+  const cy = s + 8;
+  const d = (s + 8) * 2;
+
+  if (key === 'tank') {
+    drawGolem(g, cx, cy + 2, s, c, false);
+  } else if (key === 'runner') {
+    g.fillStyle(shade(c, 0.46), 1);
+    g.fillEllipse(cx, cy + s * 0.52, s * 1.32, s * 0.42);
+    g.fillStyle(shade(c, 0.72), 1);
+    g.fillTriangle(cx - s * 0.85, cy + s * 0.18, cx + s * 0.86, cy, cx - s * 0.42, cy - s * 0.72);
+    g.fillStyle(shade(c, 1.12), 1);
+    g.fillTriangle(cx - s * 0.56, cy + s * 0.06, cx + s * 0.7, cy - s * 0.06, cx - s * 0.28, cy - s * 0.54);
+    g.fillStyle(0xffffff, 0.65);
+    g.fillCircle(cx + s * 0.24, cy - s * 0.12, Math.max(2, s * 0.11));
+  } else if (key === 'flyer') {
+    g.fillStyle(shade(c, 0.58), 1);
+    g.fillPoints(p([[cx - s * 1.28, cy], [cx - s * 0.38, cy - s * 0.35], [cx - s * 0.16, cy + s * 0.28], [cx - s * 0.86, cy + s * 0.46]]), true);
+    g.fillPoints(p([[cx + s * 1.28, cy], [cx + s * 0.38, cy - s * 0.35], [cx + s * 0.16, cy + s * 0.28], [cx + s * 0.86, cy + s * 0.46]]), true);
+    g.fillStyle(shade(c, 0.95), 1);
+    g.fillEllipse(cx, cy, s * 0.9, s * 1.18);
+    g.fillStyle(shade(c, 1.35), 1);
+    g.fillEllipse(cx - s * 0.18, cy - s * 0.22, s * 0.32, s * 0.24);
+  } else if (key === 'boss') {
+    drawGolem(g, cx, cy + s * 0.18, s, c, true);
+    g.fillStyle(0x000000, 0.18);
+    g.fillEllipse(cx, cy + s * 1.1, s * 2.55, s * 0.55);
+  } else if (key === 'splitter') {
+    drawSlime(g, cx - s * 0.42, cy + 1, s * 0.72, c);
+    drawSlime(g, cx + s * 0.42, cy + 1, s * 0.72, shade(c, 1.1));
+  } else {
+    drawSlime(g, cx, cy, s, c, key !== 'mini');
+  }
+  g.generateTexture('enemy_' + key, d, d);
 }
 
 export function generateTextures(scene) {
   const g = scene.make.graphics({ x: 0, y: 0 }, false);
 
-  // ---- 塔位：等距菱形砖（2.5D 感的核心元素）----
+  // Fallback tower slot. The painted map already includes these platforms.
   g.clear();
-  g.fillStyle(0x000000, 0.25);
-  g.fillPoints([{ x: 60, y: 12 }, { x: 116, y: 40 }, { x: 60, y: 68 }, { x: 4, y: 40 }], true); // 底影
-  g.fillStyle(0x51586e, 1);
-  g.fillPoints([{ x: 60, y: 6 }, { x: 116, y: 34 }, { x: 60, y: 62 }, { x: 4, y: 34 }], true);
-  g.fillStyle(0x6b7590, 1);
-  g.fillPoints([{ x: 60, y: 2 }, { x: 112, y: 28 }, { x: 60, y: 54 }, { x: 8, y: 28 }], true);
-  g.lineStyle(2, 0x8b95b5, 0.6);
-  g.strokePoints([{ x: 60, y: 2 }, { x: 112, y: 28 }, { x: 60, y: 54 }, { x: 8, y: 28 }], true, true);
+  drawStoneBase(g, 60, 36, 1.45, 0xbeb58e);
   g.generateTexture('slot', 120, 72);
 
-  // ---- 各元素塔身：宝石水晶造型，左亮右暗做立体 ----
   for (const [key, e] of Object.entries(ELEMENTS)) {
     g.clear();
-    const c = e.color;
-    // 底座
-    g.fillStyle(0x2b2f40, 1);
-    g.fillPoints([{ x: 36, y: 62 }, { x: 62, y: 74 }, { x: 36, y: 86 }, { x: 10, y: 74 }], true);
-    g.fillStyle(0x3d4358, 1);
-    g.fillPoints([{ x: 36, y: 58 }, { x: 60, y: 70 }, { x: 36, y: 82 }, { x: 12, y: 70 }], true);
-    // 水晶左面（亮）
-    g.fillStyle(shade(c, 1.15), 1);
-    g.fillPoints([{ x: 36, y: 6 }, { x: 36, y: 70 }, { x: 14, y: 56 }, { x: 20, y: 24 }], true);
-    // 水晶右面（暗）
-    g.fillStyle(shade(c, 0.62), 1);
-    g.fillPoints([{ x: 36, y: 6 }, { x: 36, y: 70 }, { x: 58, y: 56 }, { x: 52, y: 24 }], true);
-    // 高光
-    g.fillStyle(0xffffff, 0.5);
-    g.fillPoints([{ x: 32, y: 14 }, { x: 34, y: 40 }, { x: 26, y: 34 }, { x: 27, y: 20 }], true);
-    g.generateTexture('tower_' + key, 72, 90);
+    drawTower(g, key, e);
   }
 
-  // ---- 敌人 ----
   for (const [key, t] of Object.entries(ENEMY_TYPES)) {
     g.clear();
-    const s = t.size, c = t.color, cx = s + 4, cy = s + 4, D = (s + 4) * 2;
-    if (key === 'tank') {
-      g.fillStyle(shade(c, 0.5), 1); g.fillRoundedRect(cx - s, cy - s * 0.7 + 4, s * 2, s * 1.5, 6);
-      g.fillStyle(c, 1); g.fillRoundedRect(cx - s, cy - s * 0.85, s * 2, s * 1.5, 6);
-      g.fillStyle(shade(c, 1.3), 1); g.fillRoundedRect(cx - s + 4, cy - s * 0.85 + 4, s * 2 - 8, s * 0.5, 4);
-    } else if (key === 'runner') {
-      g.fillStyle(shade(c, 0.55), 1); g.fillTriangle(cx - s, cy + s * 0.75, cx + s, cy + 4, cx - s, cy - s * 0.55);
-      g.fillStyle(c, 1); g.fillTriangle(cx - s, cy + s * 0.6, cx + s, cy, cx - s, cy - s * 0.6);
-    } else if (key === 'flyer') {
-      g.fillStyle(c, 0.5); g.fillEllipse(cx - s * 0.8, cy, s * 1.1, s * 0.5); g.fillEllipse(cx + s * 0.8, cy, s * 1.1, s * 0.5);
-      g.fillStyle(c, 1); g.fillEllipse(cx, cy, s * 1.1, s * 0.9);
-      g.fillStyle(shade(c, 1.35), 1); g.fillEllipse(cx - 3, cy - 3, s * 0.55, s * 0.4);
-    } else if (key === 'boss') {
-      g.fillStyle(shade(c, 0.5), 1); g.fillCircle(cx, cy + 5, s);
-      // 尖刺
-      for (let i = 0; i < 8; i++) {
-        const a = i / 8 * Math.PI * 2;
-        g.fillStyle(shade(c, 0.8), 1);
-        g.fillTriangle(cx + Math.cos(a) * s * 0.8, cy + Math.sin(a) * s * 0.8,
-          cx + Math.cos(a + 0.3) * s * 0.7, cy + Math.sin(a + 0.3) * s * 0.7,
-          cx + Math.cos(a + 0.15) * s * 1.18, cy + Math.sin(a + 0.15) * s * 1.18);
-      }
-      g.fillStyle(c, 1); g.fillCircle(cx, cy, s * 0.85);
-      g.fillStyle(shade(c, 1.4), 1); g.fillCircle(cx - s * 0.22, cy - s * 0.22, s * 0.4);
-      g.fillStyle(0x1a0a10, 1); g.fillCircle(cx - s * 0.25, cy - s * 0.1, 5); g.fillCircle(cx + s * 0.25, cy - s * 0.1, 5);
-    } else if (key === 'splitter') {
-      g.fillStyle(shade(c, 0.55), 1); g.fillCircle(cx - s * 0.42, cy + 4, s * 0.72); g.fillCircle(cx + s * 0.42, cy + 4, s * 0.72);
-      g.fillStyle(c, 1); g.fillCircle(cx - s * 0.4, cy, s * 0.7); g.fillCircle(cx + s * 0.4, cy, s * 0.7);
-      g.fillStyle(shade(c, 1.35), 1); g.fillCircle(cx - s * 0.55, cy - s * 0.2, s * 0.28); g.fillCircle(cx + s * 0.25, cy - s * 0.2, s * 0.28);
-    } else { // slime / mini
-      g.fillStyle(shade(c, 0.55), 1); g.fillEllipse(cx, cy + s * 0.35, s * 2, s * 1.2);
-      g.fillStyle(c, 1); g.fillEllipse(cx, cy, s * 1.9, s * 1.6);
-      g.fillStyle(shade(c, 1.35), 1); g.fillEllipse(cx - s * 0.3, cy - s * 0.35, s * 0.7, s * 0.5);
-      g.fillStyle(0x241a38, 1); g.fillCircle(cx - s * 0.3, cy, 3.5); g.fillCircle(cx + s * 0.3, cy, 3.5);
-    }
-    g.generateTexture('enemy_' + key, D, D);
+    drawEnemy(g, key, t);
   }
 
-  // ---- 通用粒子 / 弹道 ----
-  g.clear(); g.fillStyle(0xffffff, 1); g.fillCircle(6, 6, 6); g.generateTexture('spark', 12, 12);
-  g.clear(); g.fillStyle(0xffffff, 1); g.fillCircle(8, 8, 8);
-  g.fillStyle(0xffffff, 0.4); g.fillCircle(8, 8, 8); g.generateTexture('bullet', 16, 16);
+  // Particles / projectiles
   g.clear();
-  for (let r = 32; r > 0; r -= 2) { g.fillStyle(0xffffff, 0.045); g.fillCircle(32, 32, r); }
+  g.fillStyle(0xffffff, 1);
+  g.fillCircle(6, 6, 6);
+  g.generateTexture('spark', 12, 12);
+
+  g.clear();
+  g.fillStyle(0xffffff, 1);
+  g.fillCircle(8, 8, 8);
+  g.fillStyle(0xffffff, 0.35);
+  g.fillCircle(8, 8, 8);
+  g.generateTexture('bullet', 16, 16);
+
+  g.clear();
+  for (let r = 32; r > 0; r -= 2) {
+    g.fillStyle(0xffffff, 0.045);
+    g.fillCircle(32, 32, r);
+  }
   g.generateTexture('glow', 64, 64);
-  // 阴影
-  g.clear(); g.fillStyle(0x000000, 0.3); g.fillEllipse(24, 10, 48, 20); g.generateTexture('shadow', 48, 20);
-  // 钻石
+
   g.clear();
-  g.fillStyle(0x7fd8ff, 1); g.fillPoints([{ x: 12, y: 0 }, { x: 24, y: 9 }, { x: 12, y: 26 }, { x: 0, y: 9 }], true);
-  g.fillStyle(0xc9efff, 1); g.fillPoints([{ x: 12, y: 0 }, { x: 17, y: 9 }, { x: 12, y: 26 }, { x: 7, y: 9 }], true);
-  g.generateTexture('diamond', 24, 26);
-  // 金币
-  g.clear(); g.fillStyle(0xc9930a, 1); g.fillCircle(9, 10, 8); g.fillStyle(0xffd34e, 1); g.fillCircle(9, 8, 8);
-  g.fillStyle(0xffeeaa, 1); g.fillCircle(6.5, 5.5, 3); g.generateTexture('coin', 18, 20);
-  // 基地水晶塔
+  g.fillStyle(0x000000, 0.3);
+  g.fillEllipse(24, 10, 48, 20);
+  g.generateTexture('shadow', 48, 20);
+
+  // Currency icons use a more beveled UI look to match runtime reference shots.
   g.clear();
-  g.fillStyle(0x2b2f40, 1); g.fillEllipse(45, 96, 84, 26);
-  g.fillStyle(0x8b6cd9, 1); g.fillPoints([{ x: 45, y: 4 }, { x: 45, y: 92 }, { x: 16, y: 74 }, { x: 24, y: 30 }], true);
-  g.fillStyle(0x5a3fa8, 1); g.fillPoints([{ x: 45, y: 4 }, { x: 45, y: 92 }, { x: 74, y: 74 }, { x: 66, y: 30 }], true);
-  g.fillStyle(0xffffff, 0.45); g.fillPoints([{ x: 40, y: 16 }, { x: 42, y: 50 }, { x: 32, y: 44 }, { x: 34, y: 26 }], true);
-  g.generateTexture('base', 90, 108);
+  g.fillStyle(0x0c5277, 1);
+  g.fillPoints(p([[12, 0], [24, 9], [12, 27], [0, 9]]), true);
+  g.fillStyle(0x20b9ff, 1);
+  g.fillPoints(p([[12, 0], [20, 9], [12, 14], [4, 9]]), true);
+  g.fillStyle(0x8fe8ff, 1);
+  g.fillPoints(p([[12, 0], [16, 9], [12, 27], [8, 9]]), true);
+  g.fillStyle(0xffffff, 0.72);
+  g.fillTriangle(7, 7, 12, 2, 10, 11);
+  g.generateTexture('diamond', 24, 28);
+
+  g.clear();
+  g.fillStyle(0x9b5a05, 1);
+  g.fillCircle(10, 11, 9);
+  g.fillStyle(0xffbd2e, 1);
+  g.fillCircle(10, 9, 9);
+  g.fillStyle(0xffe58a, 1);
+  g.fillCircle(7, 6, 3);
+  g.lineStyle(2, 0xb66d05, 0.8);
+  g.strokeCircle(10, 9, 6);
+  g.generateTexture('coin', 20, 22);
+
+  // Fallback base, used only when the painted map is missing.
+  g.clear();
+  g.fillStyle(0x000000, 0.22);
+  g.fillEllipse(45, 98, 84, 24);
+  drawStoneBase(g, 45, 84, 1.08, 0x2f93d1);
+  g.fillStyle(0x315e86, 1);
+  g.fillRoundedRect(18, 38, 54, 44, 6);
+  g.fillStyle(0x4f8fc0, 1);
+  g.fillRoundedRect(24, 30, 42, 44, 5);
+  g.fillStyle(0x1d3c5d, 1);
+  g.fillTriangle(18, 38, 45, 12, 72, 38);
+  g.fillStyle(0x2d79b4, 1);
+  g.fillTriangle(25, 35, 45, 18, 65, 35);
+  drawCrystal(g, 45, 4, 50, 16, 0x7fd8ff);
+  g.generateTexture('base', 90, 110);
 
   g.destroy();
 }

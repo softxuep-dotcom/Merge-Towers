@@ -118,13 +118,13 @@ export function spawnFloor(w) { return w >= 30 ? 4 : w >= 20 ? 3 : w >= 10 ? 2 :
 
 // 敌人类型（GDD §4.2）
 export const ENEMY_TYPES = {
-  slime:    { hpMult: 1,    speed: 98,  goldMult: 1,   color: 0xb08cff, size: 24, from: 1 },
-  runner:   { hpMult: 0.65, speed: 178, goldMult: 0.8, color: 0xff9cc4, size: 20, from: 3 },
-  tank:     { hpMult: 3.3,  speed: 64,  goldMult: 2.5, color: 0x9aa7b8, size: 28, armor: 0.2, from: 6 },
-  flyer:    { hpMult: 0.9,  speed: 96,  goldMult: 1.2, color: 0x7fe7e0, size: 22, flying: true, from: 9 },
-  splitter: { hpMult: 1.35, speed: 90,  goldMult: 1.5, color: 0xffc46b, size: 26, splits: true, from: 11 },
-  mini:     { hpMult: 0.35, speed: 115, goldMult: 0.3, color: 0xffc46b, size: 15, from: 99 },
-  boss:     { hpMult: 15,   speed: 48,  goldMult: 8,   color: 0xe84a5f, size: 44, boss: true, from: 5 },
+  slime:    { hpMult: 1,    speed: 98,  goldMult: 1,   color: 0x87d64a, size: 24, from: 1 },
+  runner:   { hpMult: 0.65, speed: 178, goldMult: 0.8, color: 0x55a8ff, size: 20, from: 3 },
+  tank:     { hpMult: 3.3,  speed: 64,  goldMult: 2.5, color: 0x9aa17d, size: 28, armor: 0.2, from: 6 },
+  flyer:    { hpMult: 0.9,  speed: 96,  goldMult: 1.2, color: 0x8c57d9, size: 22, flying: true, from: 9 },
+  splitter: { hpMult: 1.35, speed: 90,  goldMult: 1.5, color: 0xd6c453, size: 26, splits: true, from: 11 },
+  mini:     { hpMult: 0.35, speed: 115, goldMult: 0.3, color: 0x87d64a, size: 15, from: 99 },
+  boss:     { hpMult: 15,   speed: 48,  goldMult: 8,   color: 0x748255, size: 44, boss: true, from: 5 },
 };
 
 // 基地
@@ -160,5 +160,7 @@ export const UPGRADES = [
 export const DIAMOND = { boss: 2, elite: 1, milestone: 3, deathBonusPerWave: 5, adDaily: 5 };
 // 离线钻石（GDD §5.1）：每小时 1 + floor(最高波/10)，上限 8h
 export function offlineDiamonds(bestWave, hours) {
-  return Math.floor(Math.min(hours, 8) * (1 + Math.floor(bestWave / 10)));
+  const safeHours = Math.min(Math.max(Number(hours) || 0, 0), 8);
+  const safeBest = Math.max(Number(bestWave) || 0, 0);
+  return Math.floor(safeHours * (1 + Math.floor(safeBest / 10)));
 }
