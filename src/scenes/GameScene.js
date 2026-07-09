@@ -1,6 +1,6 @@
 import {
   W, H, MAX_LV, ELEMENTS, ENEMY_TYPES, BASE_HP, LEAK_BOSS, LEAK_NORMAL,
-  PHASES, phaseFor, towerCost, waveHp, waveCount, spawnFloor, DIAMOND,
+  PHASES, phaseFor, towerPrice, towerBasePrice, waveHp, waveCount, spawnFloor, DIAMOND,
   MERGE_SURGE, SLOT_AFFIXES, ELITE, TOWER_BRANCHES, BOSS_AFFIXES,
   NON_BOSS_SPEED_CAP, nonBossSpeedMult,
 } from '../config.js';
@@ -47,6 +47,7 @@ export class GameScene extends Phaser.Scene {
     this.baseHp = this.maxBase;
     this.wave = 1;
     this.bought = 0;
+    this.waveBought = 0; // 波内购买计数（价格热度，每波重置）
     this.kills = 0;
     this.diamondsRun = 0;
     this.highestLv = 1;
@@ -419,7 +420,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.goldRollTween) this.displayGold = this.gold;
     this.goldText.setText(String(Math.floor(this.displayGold)));
     this.diamondText.setText(String(this.S.diamonds + this.diamondsRun));
-    const cost = towerCost(this.bought);
+    const cost = towerPrice(this.wave, this.waveBought);
     if (this.pendingTowerDraft) this.buyBtn.label.setText('点空位\n放 塔');
     else if (this.towerChoiceLayer) this.buyBtn.label.setText('选元素\n...');
     else this.buyBtn.label.setText(`造 塔\n💰 ${cost}`);
@@ -634,6 +635,7 @@ export class GameScene extends Phaser.Scene {
   endWave() {
     this.waveState = 'idle';
     this.resonanceGoldMult = 1;
+    this.waveBought = 0; // 波内价格热度重置
     this.holyHealThisWave = 0;
     // 利息（GDD §5.3：5%/档，单波上限 50×档）
     const it = tier(this.S, 'interest');
@@ -860,7 +862,7 @@ export class GameScene extends Phaser.Scene {
   buyTower(silent) {
     if (silent) return this.buyTowerSilently();
     if (this.evolutionChoiceOpen || this.towerChoiceLayer || this.pendingTowerDraft) return false;
-    const cost = towerCost(this.bought);
+    const cost = towerPrice(this.wave, this.waveBought);
     if (this.gold < cost) { if (!silent) toast(this, this.buyBtn.x, this.buyBtn.y - 135, '金币不足', '#ff8888', 24); return false; }
     const free = this.slots.filter(s => !s.tower);
     if (!free.length) { if (!silent) toast(this, this.buyBtn.x, this.buyBtn.y - 135, '塔位已满，先合成!', '#ff8888', 24); return false; }
@@ -873,12 +875,13 @@ export class GameScene extends Phaser.Scene {
 
   buyTowerSilently() {
     if (this.evolutionChoiceOpen || this.towerChoiceLayer || this.pendingTowerDraft) return false;
-    const cost = towerCost(this.bought);
+    const cost = towerPrice(this.wave, this.waveBought);
     if (this.gold < cost) return false;
     const free = this.slots.filter(s => !s.tower);
     if (!free.length) return false;
     this.gold -= cost;
     this.bought++;
+    this.waveBought++;
     const lv = this.rollSpawnLv();
     const elem = this.smartRandomElem(lv);
     const branch = lv >= 4 ? this.randomBranch(elem) : null;
@@ -928,27 +931,33 @@ export class GameScene extends Phaser.Scene {
     const xs = wide ? choices.map(() => centerX) : (choices.length === 2 ? [260, 460] : [160, 360, 560]);
     choices.forEach((elem, i) => {
       const def = ELEMENTS[elem];
+      // Lv4+ 的分支在发牌时就摇定并印在卡面上（规则透明，玩家点卡前可见血统）
+      const branch = lv >= 4 ? this.randomBranch(elem) : null;
+      const bdef = branch ? TOWER_BRANCHES[elem][branch] : null;
       const x = xs[i];
       const card = this.add.container(x, wide ? 288 + i * 78 : 1020);
       const bg = this.add.rectangle(0, 0, wide ? panelW - 54 : 178, wide ? 64 : 96, 0x23283a, 1)
         .setStrokeStyle(3, def.color, 0.9);
       const glow = this.add.image(wide ? -118 : -56, wide ? 0 : -18, 'glow').setTint(def.color).setAlpha(0.34).setScale(wide ? 0.6 : 0.72);
       const icon = this.add.image(wide ? -118 : -56, wide ? 4 : -12, 'tower_' + elem).setScale(wide ? 0.5 : 0.62);
-      const name = this.uiText(wide ? -78 : -18, wide ? -16 : -22, def.cn, wide ? 24 : 28, this.hexColor(def.color)).setOrigin(0, 0.5);
-      const desc = this.uiText(wide ? -78 : -18, wide ? 17 : 20, def.desc, wide ? 16 : 18, '#c9d2f0').setOrigin(0, 0.5);
+      const name = this.uiText(wide ? -78 : -18, wide ? -16 : -22,
+        bdef ? `${def.cn}·${bdef.cn}` : def.cn, wide ? 24 : 28, this.hexColor(def.color)).setOrigin(0, 0.5);
+      const desc = this.uiText(wide ? -78 : -18, wide ? 17 : 20,
+        bdef ? bdef.desc : def.desc, wide ? 16 : 18, '#c9d2f0').setOrigin(0, 0.5);
+      if (bdef) desc.setWordWrapWidth(wide ? panelW - 130 : 130);
       card.add([bg, glow, icon, name, desc]);
       card.setSize(wide ? panelW - 54 : 178, wide ? 64 : 96).setInteractive({ useHandCursor: true });
       card.on('pointerover', () => bg.setFillStyle(0x30364d));
       card.on('pointerout', () => bg.setFillStyle(0x23283a));
-      card.on('pointerdown', () => this.beginTowerPlacement(elem, lv, cost));
+      card.on('pointerdown', () => this.beginTowerPlacement(elem, lv, cost, branch));
       layer.add(card);
     });
   }
 
-  beginTowerPlacement(elem, lv, cost) {
+  beginTowerPlacement(elem, lv, cost, branch = null) {
     this.clearTowerChoiceLayer();
     this.ensureResponsiveLayout();
-    const branch = lv >= 4 ? this.randomBranch(elem) : null;
+    if (lv >= 4 && !branch) branch = this.randomBranch(elem);
     this.pendingTowerDraft = { elem, lv, branch, cost };
     const hintX = this.layout.landscape ? this.layout.x(this.layout.fieldCenterScreen) : W / 2;
     const hintY = this.layout.landscape ? Math.min(1120, this.layout.viewH - 150) : 905;
@@ -1001,6 +1010,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.gold -= draft.cost;
     this.bought++;
+    this.waveBought++;
     this.placeTower(nearest, draft.elem, draft.lv, draft.branch);
     Sfx.buy();
     this.clearPendingTowerDraft();
@@ -1505,7 +1515,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   sellTower(t) {
-    const refund = Math.round(towerCost(this.bought) * 0.5);
+    const refund = Math.round(towerBasePrice(this.wave) * 0.5);
     this.gold += refund;
     t.slot.tower = null;
     this.towers = this.towers.filter(x => x !== t);
@@ -2258,7 +2268,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const freeSlots = this.slots.filter(s => !s.tower).length;
-    if (freeSlots > 0 && this.gold >= towerCost(this.bought)) {
+    if (freeSlots > 0 && this.gold >= towerPrice(this.wave, 0)) {
       candidates.push({
         key: 'idle_gold_slots',
         text: `你死于第 ${wave} 波：还空着 ${freeSlots} 个塔位 → 金币别攥着，塔位空一格就是防线漏一格`,

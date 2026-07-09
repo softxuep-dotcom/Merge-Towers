@@ -105,16 +105,28 @@ export function nonBossSpeedMult(w) {
   return 1;
 }
 
-// 买塔价格：20 × 1.15^n（n=已购买次数）
-export function towerCost(bought) {
-  return Math.round(20 * Math.pow(1.15, bought));
+// 波次数值（GDD §4.3）：HP 增速波 22 后压平 1.19→1.155，拉开不同强度玩家的墓碑差距
+export function waveHp(w) {
+  return 18 * Math.pow(1.19, Math.min(w, 22)) * Math.pow(1.155, Math.max(0, w - 22));
 }
-
-// 波次数值（GDD §4.3）
-export function waveHp(w)    { return 18 * Math.pow(1.19, w); }
 export function waveCount(w) { return Math.min(34, 8 + Math.floor(0.95 * w)); }
-// 生成等级地板（GDD §3.1）
-export function spawnFloor(w) { return w >= 30 ? 4 : w >= 20 ? 3 : w >= 10 ? 2 : 1; }
+// 生成等级地板（GDD §3.1）：相位对齐撞墙区间，封顶 Lv6（Lv7/8 只能靠合成）
+export function spawnFloor(w) { return w >= 40 ? 6 : w >= 30 ? 5 : w >= 22 ? 4 : w >= 15 ? 3 : w >= 8 ? 2 : 1; }
+
+// 普通波平均金币系数（按 composeWave 随机池权重推得，推导见 tools/balance-sim.mjs）
+function avgGoldMult(w) { return w >= 11 ? 1.47 : w >= 9 ? 1.35 : w >= 6 ? 1.39 : w >= 3 ? 0.89 : 1.0; }
+// 期望单波收入（一律按普通波构成估算，Boss 波也用它定价，避免塔价随波型跳变）
+export function expectedWaveIncome(w) {
+  return waveCount(w) * waveHp(w) * 0.1 * avgGoldMult(w);
+}
+// 买塔价格（GDD §3.7）：当波收入 35% 起步，波内每多买一次 ×1.3，下波重置。
+// 价格挂钩当期支付能力而非购买史 —— 任何玩家每波都稳定买得起 1~2 个，第 3 个要掂量。
+export function towerBasePrice(w) {
+  return Math.max(20, Math.round(expectedWaveIncome(w) * 0.35));
+}
+export function towerPrice(w, buysThisWave) {
+  return Math.round(towerBasePrice(w) * Math.pow(1.3, buysThisWave));
+}
 
 // 敌人类型（GDD §4.2）
 export const ENEMY_TYPES = {
@@ -124,7 +136,7 @@ export const ENEMY_TYPES = {
   flyer:    { hpMult: 0.9,  speed: 96,  goldMult: 1.2, color: 0x8c57d9, size: 22, flying: true, from: 9 },
   splitter: { hpMult: 1.35, speed: 90,  goldMult: 1.5, color: 0xd6c453, size: 26, splits: true, from: 11 },
   mini:     { hpMult: 0.35, speed: 115, goldMult: 0.3, color: 0x87d64a, size: 15, from: 99 },
-  boss:     { hpMult: 15,   speed: 48,  goldMult: 8,   color: 0x748255, size: 44, boss: true, from: 5 },
+  boss:     { hpMult: 15,   speed: 48,  goldMult: 14,  color: 0x748255, size: 44, boss: true, from: 5 },
 };
 
 // 基地

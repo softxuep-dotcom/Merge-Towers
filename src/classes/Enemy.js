@@ -1,4 +1,10 @@
 import { ENEMY_TYPES, ELITE, waveHp, BOSS_AFFIXES, BOSS_CONTROL } from '../config.js';
+import {
+  PAINTED_ENEMY_ATLAS,
+  paintedEnemyAnimKey,
+  paintedEnemyFrameTarget,
+  paintedEnemyKey,
+} from '../textures.js';
 
 // 路径：折线 + 按距离取点
 export class Path {
@@ -68,7 +74,17 @@ export class Enemy {
     const p = path.pointAt(this.progress);
     const spriteY = this.flying ? -30 : 0;
     this.shadow = scene.add.image(0, 6, 'shadow').setScale((this.boss ? 1.8 : 0.8) * (this.elite ? 1.25 : 1));
-    this.spr = scene.add.image(0, spriteY, 'enemy_' + typeKey);
+    this.paintedKey = paintedEnemyKey(typeKey);
+    this.usesPaintedSprite = scene.textures.exists(PAINTED_ENEMY_ATLAS) && scene.anims.exists(paintedEnemyAnimKey(this.paintedKey, 'left'));
+    if (this.usesPaintedSprite) {
+      this.spr = scene.add.sprite(0, spriteY, PAINTED_ENEMY_ATLAS, `${this.paintedKey}_left_1`);
+      const target = paintedEnemyFrameTarget(this.paintedKey, this.type);
+      this.spr.setScale(target / this.spr.height);
+      const next = path.pointAt(Math.min(path.total, this.progress + 6));
+      this.setFacingByDelta(next.x - p.x, next.y - p.y);
+    } else {
+      this.spr = scene.add.image(0, spriteY, 'enemy_' + typeKey);
+    }
     const bw = this.boss ? 72 : 42;
     this.barBg = scene.add.rectangle(0, spriteY - this.type.size - 16, bw, 6, 0x000000, 0.55).setVisible(false);
     this.bar = scene.add.rectangle(0, spriteY - this.type.size - 16, bw, 6, 0x8bf05a).setVisible(false);
@@ -289,6 +305,7 @@ export class Enemy {
       return;
     }
     const p = this.path.pointAt(this.progress);
+    this.setFacingByDelta(p.x - this.c.x, p.y - this.c.y);
     this.c.setPosition(p.x, p.y);
     this.c.setDepth(p.y + (this.flying ? 220 : 0));
     if (this.flying) {
@@ -302,5 +319,18 @@ export class Enemy {
 
   destroy() {
     this.c.destroy();
+  }
+
+  setFacingByDelta(dx, dy) {
+    if (!this.usesPaintedSprite || (Math.abs(dx) < 0.25 && Math.abs(dy) < 0.25)) return;
+    const front = dy > 0 && Math.abs(dy) >= Math.abs(dx) * 0.65;
+    const direction = front ? 'front' : 'left';
+    const animKey = paintedEnemyAnimKey(this.paintedKey, direction);
+    if (this.facingDirection !== direction) {
+      this.facingDirection = direction;
+      this.spr.play(animKey);
+    }
+    // The atlas stores front + left. Right-facing movement mirrors the left set.
+    this.spr.setFlipX(!front && dx > 0);
   }
 }

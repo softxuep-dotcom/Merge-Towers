@@ -2,6 +2,43 @@
 // Keeps M4 package size tiny while the final hand-painted atlas is still absent.
 import { ELEMENTS, ENEMY_TYPES } from './config.js';
 
+export const PAINTED_ENEMY_ATLAS = 'enemy_atlas';
+export const PAINTED_ENEMY_KEYS = ['slime', 'mini', 'runner', 'tank', 'flyer', 'splitter', 'boss'];
+
+export function paintedEnemyKey(typeKey) {
+  return PAINTED_ENEMY_KEYS.includes(typeKey) ? typeKey : 'slime';
+}
+
+export function paintedEnemyAnimKey(typeKey, direction = 'left') {
+  return `enemy_${paintedEnemyKey(typeKey)}_${direction}`;
+}
+
+export function paintedEnemyFrameTarget(typeKey, type) {
+  if (typeKey === 'boss') return 112;
+  if (typeKey === 'tank') return 82;
+  if (typeKey === 'flyer') return 78;
+  if (typeKey === 'splitter') return 76;
+  if (typeKey === 'runner') return 64;
+  if (typeKey === 'mini') return 42;
+  return (type.size + 8) * 2;
+}
+
+export function createEnemyAnimations(scene) {
+  if (!scene.textures.exists(PAINTED_ENEMY_ATLAS)) return;
+  for (const key of PAINTED_ENEMY_KEYS) {
+    for (const direction of ['front', 'left']) {
+      const animKey = paintedEnemyAnimKey(key, direction);
+      if (scene.anims.exists(animKey)) continue;
+      scene.anims.create({
+        key: animKey,
+        frames: [1, 2, 3, 4].map(i => ({ key: PAINTED_ENEMY_ATLAS, frame: `${key}_${direction}_${i}` })),
+        frameRate: key === 'runner' || key === 'flyer' ? 9 : 7,
+        repeat: -1,
+      });
+    }
+  }
+}
+
 function shade(color, f) {
   const c = Phaser.Display.Color.IntegerToColor(color);
   const r = Math.min(255, Math.round(c.red * f));
