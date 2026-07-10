@@ -16,15 +16,19 @@ import { writeSave, tier, unlockedElements } from '../save.js';
 
 // 地面路径（行进式像素描迹校准到石板路中轴线，2026-07-09）
 const PATH_PTS = [
-  { x: 30, y: -20 }, { x: 100, y: 60 }, { x: 155, y: 105 }, { x: 175, y: 150 },
-  { x: 163, y: 210 }, { x: 160, y: 265 }, { x: 185, y: 320 },
-  { x: 210, y: 338 }, { x: 545, y: 338 }, { x: 572, y: 360 },
-  { x: 566, y: 430 }, { x: 560, y: 540 }, { x: 555, y: 650 }, { x: 520, y: 684 },
-  { x: 185, y: 684 }, { x: 148, y: 700 }, { x: 118, y: 735 }, { x: 114, y: 780 },
-  { x: 125, y: 808 }, { x: 180, y: 832 },
-  { x: 545, y: 832 }, { x: 580, y: 852 }, { x: 597, y: 890 }, { x: 600, y: 925 },
-  { x: 585, y: 965 }, { x: 540, y: 1000 }, { x: 480, y: 1022 },
+  { x: 118, y: -35 }, { x: 120, y: 40 }, { x: 135, y: 100 }, { x: 153, y: 158 },
+  { x: 168, y: 220 }, { x: 160, y: 275 }, { x: 145, y: 305 }, { x: 172, y: 330 },
+  { x: 230, y: 333 }, { x: 315, y: 333 }, { x: 410, y: 333 }, { x: 515, y: 333 },
+  { x: 585, y: 338 }, { x: 628, y: 370 }, { x: 646, y: 425 }, { x: 646, y: 500 },
+  { x: 644, y: 590 }, { x: 620, y: 640 }, { x: 575, y: 664 }, { x: 480, y: 666 },
+  { x: 380, y: 666 }, { x: 280, y: 666 }, { x: 190, y: 666 }, { x: 130, y: 680 },
+  { x: 92, y: 722 }, { x: 88, y: 775 }, { x: 118, y: 812 }, { x: 170, y: 825 },
+  { x: 270, y: 825 }, { x: 370, y: 825 }, { x: 480, y: 825 }, { x: 555, y: 830 },
+  { x: 595, y: 862 }, { x: 598, y: 902 }, { x: 560, y: 940 }, { x: 500, y: 975 },
+  { x: 440, y: 1005 }, { x: 390, y: 1045 }, { x: 365, y: 1100 }, { x: 382, y: 1142 },
+  { x: 430, y: 1168 }, { x: 470, y: 1158 }, { x: 492, y: 1130 },
 ];
+
 // 飞行兵直线航道：与地面怪同一左上入口进场，直线抄近路飞向城堡（GDD §4.2）
 const FLY_PTS = [{ x: 60, y: -30 }, { x: 480, y: 1015 }];
 const SLOT_XS = [159, 260, 362, 464, 565];
@@ -766,13 +770,15 @@ export class GameScene extends Phaser.Scene {
     if (cause === 'poison' && e.poisons.some(p => p.plague)) {
       const src = e.poisons.find(p => p.plague);
       const radius = src.plagueRadius || 95;
-      this.burst(e.x, e.y, 0x7ede55, 20, 1.3);
+      const infected = [];
       for (const o of this.enemies) {
-        if (Phaser.Math.Distance.Between(e.x, e.y, o.x, o.y) < radius) {
+        if (!o.dead && Phaser.Math.Distance.Between(e.x, e.y, o.x, o.y) < radius) {
+          infected.push({ x: o.x, y: o.y });
           o.applyPoison(src.dps, 2, false);
           o.killGoldMult = Math.max(o.killGoldMult || 1, src.goldMult || 1);
         }
       }
+      this.playPlagueBurstFx(e.x, e.y, radius, infected);
     }
     e.destroy();
     this.updateUI();
@@ -1468,7 +1474,7 @@ export class GameScene extends Phaser.Scene {
           if (e.dead) return;
           this.lightBeam(t.slot.x, t.slot.y - 70, e.x, e.y - 10);
           this.showDmg(e.x, e.y - 54, '处决!', '#fff8dc');
-          this.burst(e.x, e.y, t.color, 18, 1);
+          this.playExecuteFx(t, e.x, e.y);
           e.takeDamage(e.hp + 1, { trueDmg: true, cause: 'execute', sourceTower: t });
         });
       });
@@ -1489,11 +1495,27 @@ export class GameScene extends Phaser.Scene {
 
   lightBeam(x1, y1, x2, y2) {
     const g = this.add.graphics().setDepth(2140);
-    g.lineStyle(8, 0xfff8dc, 0.85);
+    g.lineStyle(18, 0xfff8dc, 0.2);
     g.lineBetween(x1, y1, x2, y2);
-    g.lineStyle(18, 0xfff8dc, 0.22);
+    g.lineStyle(8, 0xfff8dc, 0.82);
     g.lineBetween(x1, y1, x2, y2);
-    this.tweens.add({ targets: g, alpha: 0, duration: 240, onComplete: () => g.destroy() });
+    g.lineStyle(3, 0xffffff, 0.92);
+    g.lineBetween(x1, y1, x2, y2);
+    this.tweens.add({ targets: g, alpha: 0, duration: 240, ease: 'Quad.Out', onComplete: () => g.destroy() });
+
+    const end = this.add.image(x2, y2, 'glow')
+      .setTint(0xfff8dc)
+      .setAlpha(0.46)
+      .setScale(0.42)
+      .setDepth(2141);
+    this.tweens.add({
+      targets: end,
+      scale: 0.95,
+      alpha: 0,
+      duration: 240,
+      ease: 'Cubic.Out',
+      onComplete: () => end.destroy(),
+    });
   }
 
   pathSamplesNear(path, x, y, radius, step) {
@@ -1674,10 +1696,13 @@ export class GameScene extends Phaser.Scene {
     return 1;
   }
 
-  sourceBonusFor(t, target, opts = {}) {
+  sourceBonusFor(t) {
     let bonus = this.holyAuraBonus(t);
-    if (opts.shatter) bonus += t.lv >= 7 ? 2.5 : 1.5;
     return Math.min(1, bonus);
+  }
+
+  shatterDamageMult(lv) {
+    return lv >= 7 ? 2.6 : 2.2;
   }
 
   holyAuraBonus(t) {
@@ -1696,9 +1721,11 @@ export class GameScene extends Phaser.Scene {
       this.atkBuffT = 3;
       this.atkBuffMult = Math.max(this.atkBuffMult || 1.3, 1.5);
       toast(this, t.slot.x, t.slot.y - 110, '审判：全场攻速+50%', '#fff8dc', 22);
+      this.playJudgementPulseFx(t, true);
     } else {
       t.selfBuffT = 3;
       toast(this, t.slot.x, t.slot.y - 110, '审判：攻速+50%', '#fff8dc', 22);
+      this.playJudgementPulseFx(t, false);
     }
   }
 
@@ -1723,7 +1750,7 @@ export class GameScene extends Phaser.Scene {
 
     if (elem === 'lightning') {
       // 连锁闪电：瞬发
-      const chainN = 3 + (branch === 'a' ? 2 + (lv >= 7 ? 2 : 0) : 0);
+      const chainN = 3 + (branch === 'a' ? 2 + (lv >= 7 ? 1 : 0) : 0);
       const chain = [target];
       while (chain.length < chainN) {
         const last = chain[chain.length - 1];
@@ -1736,20 +1763,17 @@ export class GameScene extends Phaser.Scene {
         if (!next) break;
         chain.push(next);
       }
-      const g = this.add.graphics().setDepth(2100);
-      g.lineStyle(3, 0xfff2a8, 0.95);
-      let px = sx, py = sy;
-      for (const e of chain) { this.zigzag(g, px, py, e.x, e.y - 10); px = e.x; py = e.y - 10; }
-      this.tweens.add({ targets: g, alpha: 0, duration: 180, onComplete: () => g.destroy() });
+      this.playLightningChainFx(sx, sy, chain, branch);
       chain.forEach((e, i) => {
-        const mult = (branch === 'a' && i === chain.length - 1) ? 2 : 1;
+        const ex = e.x, ey = e.y;
+        const mult = (branch === 'a' && i === chain.length - 1) ? 1.75 : 1;
         const real = e.takeDamage(dmg * mult, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, e) });
-        this.showDmg(e.x, e.y - 40, real, '#fff2a8');
+        this.showDmg(ex, ey - 40, real, '#fff2a8');
         if (branch === 'b' && !e.dead) {
           const chance = lv >= 7 ? 0.25 : 0.15;
           if (Math.random() < chance && e.applyStun(0.5)) {
-            this.showDmg(e.x, e.y - 58, '眩晕', '#fff2a8');
-            this.burst(e.x, e.y, 0xfff2a8, 8, 0.7);
+            this.showDmg(ex, ey - 58, '眩晕', '#fff2a8');
+            this.playStunRingFx(ex, ey);
           }
         }
       });
@@ -1759,16 +1783,12 @@ export class GameScene extends Phaser.Scene {
 
     if (elem === 'light') {
       // 光束：瞬发 + 斩杀
-      const g = this.add.graphics().setDepth(2100);
-      g.lineStyle(5, 0xfff8dc, 0.9);
-      g.lineBetween(sx, sy, target.x, target.y - 10);
-      g.lineStyle(10, 0xfff8dc, 0.25);
-      g.lineBetween(sx, sy, target.x, target.y - 10);
-      this.tweens.add({ targets: g, alpha: 0, duration: 200, onComplete: () => g.destroy() });
+      const tx = target.x, ty = target.y;
+      this.lightBeam(sx, sy, tx, ty - 10);
       const threshold = branch === 'a' ? 0.25 : 0.15;
       if (target.hp / target.maxHp <= threshold) {
-        this.showDmg(target.x, target.y - 50, '处决!', '#fff8dc');
-        this.burst(target.x, target.y, 0xfff8dc, 16, 1.1);
+        this.showDmg(tx, ty - 50, '处决!', '#fff8dc');
+        this.playExecuteFx(t, tx, ty);
         Sfx.execute();
         this.applyJudgementBuff(t);
         this.tryHolyHeal(t);
@@ -1776,7 +1796,7 @@ export class GameScene extends Phaser.Scene {
       } else {
         const mult = target.flying ? 1.5 : 1;
         const real = target.takeDamage(dmg * mult, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
-        this.showDmg(target.x, target.y - 40, real, '#fff8dc');
+        this.showDmg(tx, ty - 40, real, '#fff8dc');
       }
       return;
     }
@@ -1796,9 +1816,10 @@ export class GameScene extends Phaser.Scene {
             if (target.dead) return;
             const crit = Math.random() < (lv >= 7 ? 0.5 : 0.3);
             const hit = dmg * 2.2 * (crit ? 3 : 1);
+            const tx = target.x, ty = target.y;
             const real = target.takeDamage(hit, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
-            this.showDmg(target.x, target.y - 44, crit ? `暴击 ${Math.round(real)}` : real, crit ? '#ffe97a' : '#ffb199');
-            this.burst(target.x, target.y, crit ? 0xffe97a : color, crit ? 18 : 12, crit ? 1.2 : 0.85);
+            this.showDmg(tx, ty - 44, crit ? `暴击 ${Math.round(real)}` : real, crit ? '#ffe97a' : '#ffb199');
+            this.playMoltenImpactFx(sx, sy, tx, ty, crit);
             return;
           }
           const radius = (62 + lv * 2) * (branch === 'a' ? 1.6 : 1);
@@ -1806,8 +1827,9 @@ export class GameScene extends Phaser.Scene {
           for (const e of [...this.enemies]) {
             if (e.dead) continue;
             if (Phaser.Math.Distance.Between(ix, iy, e.x, e.y) <= radius + this.enemySize(e) * 0.5) {
+              const ex = e.x, ey = e.y;
               const real = e.takeDamage(dmg, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, e) });
-              this.showDmg(e.x, e.y - 40, real, '#ffb199');
+              this.showDmg(ex, ey - 40, real, '#ffb199');
             }
           }
           if (branch === 'a') {
@@ -1819,15 +1841,35 @@ export class GameScene extends Phaser.Scene {
           }
         } else if (elem === 'ice') {
           if (!target.dead) {
-            const shatter = branch === 'b' && (target.slowT > 0 || target.frozenT > 0);
-            const real = target.takeDamage(dmg, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target, { shatter }) });
-            this.showDmg(target.x, target.y - 40, real, '#bfe8ff');
-            target.applySlow(branch === 'a' ? 70 : 60);
-            const freezeChance = branch === 'a' ? (lv >= 7 ? 0.2 : 0.1) : 0;
-            if (freezeChance > 0 && Math.random() < freezeChance && !target.dead && target.applyFreeze(1)) {
-              Sfx.freeze();
-              this.burst(target.x, target.y, 0xbfe8ff, 10, 0.8);
+            const slowCap = 80;
+            if (branch === 'a') {
+              const novaChance = lv >= 7 ? 0.3 : 0.2;
+              if (Math.random() < novaChance) {
+                const novaRadius = 86 + lv * 6;
+                const mainMult = lv >= 7 ? 1.9 : 1.6;
+                const splashMult = lv >= 7 ? 0.65 : 0.45;
+                const slowDuration = lv >= 7 ? 2.8 : 2.2;
+                const cx = target.x, cy = target.y;
+                this.playFrostNovaFx(cx, cy, novaRadius, lv >= 7);
+                for (const e of [...this.enemies]) {
+                  if (e.dead) continue;
+                  const d = Phaser.Math.Distance.Between(cx, cy, e.x, e.y);
+                  if (d > novaRadius + this.enemySize(e) * 0.5) continue;
+                  const mult = e === target ? mainMult : splashMult;
+                  const ex = e.x, ey = e.y;
+                  const real = e.takeDamage(dmg * mult, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, e) });
+                  this.showDmg(ex, ey - 40, real, e === target ? '#e8f6ff' : '#bfe8ff');
+                  if (!e.dead) e.applySlow(slowCap, slowDuration, 50, 20);
+                }
+                return;
+              }
             }
+            const shatter = branch === 'b' && (target.slowT > 0 || target.frozenT > 0);
+            const tx = target.x, ty = target.y;
+            const hit = dmg * (shatter ? this.shatterDamageMult(lv) : 1);
+            const real = target.takeDamage(hit, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
+            this.showDmg(tx, ty - 40, real, '#bfe8ff');
+            if (!target.dead) target.applySlow(slowCap, 2, 20, 20);
           }
         } else if (elem === 'poison') {
           if (!target.dead) {
@@ -1861,6 +1903,408 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ================= 特效工具 =================
+  playFrostNovaFx(x, y, radius, strong = false) {
+    const fog = this.add.image(x, y, 'glow')
+      .setTint(0x9fe8ff)
+      .setAlpha(strong ? 0.32 : 0.24)
+      .setScale(radius / 34)
+      .setDepth(2054);
+    this.tweens.add({
+      targets: fog,
+      scale: radius / 18,
+      alpha: 0,
+      duration: 620,
+      ease: 'Cubic.Out',
+      onComplete: () => fog.destroy(),
+    });
+
+    const core = this.add.image(x, y, 'glow')
+      .setTint(0xffffff)
+      .setAlpha(0.78)
+      .setScale(0.42)
+      .setDepth(2086);
+    this.tweens.add({
+      targets: core,
+      scale: strong ? 1.45 : 1.15,
+      alpha: 0,
+      duration: 240,
+      ease: 'Quad.Out',
+      onComplete: () => core.destroy(),
+    });
+
+    const ring = this.add.circle(x, y, radius, 0xbfe8ff, 0.07)
+      .setStrokeStyle(strong ? 6 : 5, 0xe8f6ff, 0.9)
+      .setScale(0.16)
+      .setDepth(2083);
+    this.tweens.add({
+      targets: ring,
+      scale: 1,
+      alpha: 0,
+      duration: 360,
+      ease: 'Cubic.Out',
+      onComplete: () => ring.destroy(),
+    });
+
+    const innerRing = this.add.circle(x, y, radius * 0.58, 0xffffff, 0)
+      .setStrokeStyle(3, 0x7edbff, 0.72)
+      .setScale(0.28)
+      .setDepth(2084);
+    this.tweens.add({
+      targets: innerRing,
+      scale: 1.18,
+      alpha: 0,
+      duration: 300,
+      ease: 'Cubic.Out',
+      onComplete: () => innerRing.destroy(),
+    });
+
+    const cracks = this.add.graphics().setDepth(2082);
+    cracks.lineStyle(strong ? 3 : 2, 0xe8f6ff, 0.74);
+    const crackCount = strong ? 10 : 7;
+    for (let i = 0; i < crackCount; i++) {
+      const a = (Math.PI * 2 * i / crackCount) + (Math.random() - 0.5) * 0.3;
+      const r1 = radius * Phaser.Math.Between(22, 36) / 100;
+      const r2 = radius * Phaser.Math.Between(72, 104) / 100;
+      cracks.lineBetween(
+        x + Math.cos(a) * r1,
+        y + Math.sin(a) * r1,
+        x + Math.cos(a) * r2,
+        y + Math.sin(a) * r2,
+      );
+    }
+    this.tweens.add({
+      targets: cracks,
+      alpha: 0,
+      duration: 420,
+      ease: 'Quad.Out',
+      onComplete: () => cracks.destroy(),
+    });
+
+    const shards = this.add.particles(x, y, 'spark', {
+      angle: { min: 0, max: 360 },
+      speed: { min: strong ? 180 : 130, max: strong ? 430 : 340 },
+      scale: { start: strong ? 1.28 : 1.0, end: 0 },
+      lifespan: strong ? 700 : 560,
+      tint: 0xbfe8ff,
+      emitting: false,
+    }).setDepth(2090);
+    shards.explode(strong ? 54 : 38);
+    this.time.delayedCall(strong ? 880 : 720, () => shards.destroy());
+
+    this.cameras.main.shake(strong ? 170 : 110, strong ? 0.004 : 0.0025);
+  }
+
+  playPlagueBurstFx(x, y, radius, targets = []) {
+    const cloud = this.add.image(x, y, 'glow')
+      .setTint(0x7ede55)
+      .setAlpha(0.48)
+      .setScale(radius / 34)
+      .setDepth(2072);
+    this.tweens.add({
+      targets: cloud,
+      scale: radius / 17,
+      alpha: 0,
+      duration: 740,
+      ease: 'Cubic.Out',
+      onComplete: () => cloud.destroy(),
+    });
+
+    const ring = this.add.circle(x, y, radius, 0x7ede55, 0.08)
+      .setStrokeStyle(5, 0x9ef07a, 0.72)
+      .setScale(0.18)
+      .setDepth(2074);
+    this.tweens.add({
+      targets: ring,
+      scale: 1,
+      alpha: 0,
+      duration: 440,
+      ease: 'Cubic.Out',
+      onComplete: () => ring.destroy(),
+    });
+
+    const spores = this.add.particles(x, y, 'spark', {
+      angle: { min: 0, max: 360 },
+      speed: { min: 90, max: 280 },
+      scale: { start: 1.1, end: 0 },
+      lifespan: 760,
+      tint: 0x9ef07a,
+      emitting: false,
+    }).setDepth(2080);
+    spores.explode(32 + Math.min(22, targets.length * 3));
+    this.time.delayedCall(960, () => spores.destroy());
+
+    if (!targets.length) return;
+    const lines = this.add.graphics().setDepth(2079);
+    lines.lineStyle(2, 0x9ef07a, 0.54);
+    for (const target of targets.slice(0, 14)) {
+      lines.lineBetween(x, y, target.x, target.y);
+    }
+    this.tweens.add({
+      targets: lines,
+      alpha: 0,
+      duration: 360,
+      ease: 'Quad.Out',
+      onComplete: () => lines.destroy(),
+    });
+
+    targets.slice(0, 10).forEach((target, i) => {
+      const spore = this.add.image(x, y, 'spark')
+        .setTint(0x9ef07a)
+        .setAlpha(0.95)
+        .setScale(0.75)
+        .setDepth(2084);
+      this.tweens.add({
+        targets: spore,
+        x: target.x,
+        y: target.y - 8,
+        alpha: 0.35,
+        scale: 1.15,
+        delay: i * 18,
+        duration: 210 + i * 10,
+        ease: 'Cubic.Out',
+        onComplete: () => {
+          spore.destroy();
+          this.burst(target.x, target.y, 0x9ef07a, 5, 0.45);
+        },
+      });
+    });
+  }
+
+  playMoltenImpactFx(sx, sy, x, y, crit = false) {
+    const muzzle = this.add.image(sx, sy, 'glow')
+      .setTint(0xffe2a3)
+      .setAlpha(0.76)
+      .setScale(crit ? 0.78 : 0.58)
+      .setDepth(2075);
+    this.tweens.add({
+      targets: muzzle,
+      scale: crit ? 1.36 : 0.96,
+      alpha: 0,
+      duration: 150,
+      ease: 'Quad.Out',
+      onComplete: () => muzzle.destroy(),
+    });
+
+    const trace = this.add.graphics().setDepth(2072);
+    trace.lineStyle(crit ? 9 : 6, 0xff7a2f, crit ? 0.34 : 0.22);
+    trace.lineBetween(sx, sy, x, y - 10);
+    trace.lineStyle(crit ? 4 : 3, 0xfff2a8, 0.86);
+    trace.lineBetween(sx, sy, x, y - 10);
+    this.tweens.add({
+      targets: trace,
+      alpha: 0,
+      duration: crit ? 210 : 170,
+      ease: 'Quad.Out',
+      onComplete: () => trace.destroy(),
+    });
+
+    const core = this.add.image(x, y, 'glow')
+      .setTint(crit ? 0xfff2a8 : 0xff9b45)
+      .setAlpha(crit ? 0.82 : 0.62)
+      .setScale(crit ? 0.72 : 0.52)
+      .setDepth(2084);
+    this.tweens.add({
+      targets: core,
+      scale: crit ? 2.05 : 1.28,
+      alpha: 0,
+      duration: crit ? 290 : 220,
+      ease: 'Cubic.Out',
+      onComplete: () => core.destroy(),
+    });
+
+    const ring = this.add.circle(x, y, crit ? 48 : 34, 0xff9b45, 0)
+      .setStrokeStyle(crit ? 8 : 5, crit ? 0xfff2a8 : 0xff9b45, crit ? 0.82 : 0.58)
+      .setScale(0.18)
+      .setDepth(2083);
+    this.tweens.add({
+      targets: ring,
+      scale: crit ? 2.35 : 1.55,
+      alpha: 0,
+      duration: crit ? 360 : 260,
+      ease: 'Cubic.Out',
+      onComplete: () => ring.destroy(),
+    });
+
+    const sparks = this.add.particles(x, y, 'spark', {
+      angle: { min: 0, max: 360 },
+      speed: { min: crit ? 190 : 100, max: crit ? 420 : 280 },
+      gravityY: crit ? 260 : 180,
+      scale: { start: crit ? 1.32 : 0.9, end: 0 },
+      lifespan: crit ? 650 : 460,
+      tint: crit ? 0xffe97a : 0xff9b45,
+      emitting: false,
+    }).setDepth(2085);
+    sparks.explode(crit ? 42 : 18);
+    this.time.delayedCall(crit ? 840 : 620, () => sparks.destroy());
+
+    this.cameras.main.shake(crit ? 190 : 80, crit ? 0.006 : 0.002);
+  }
+
+  playLightningChainFx(sx, sy, chain, branch = null) {
+    const segments = [];
+    let from = { x: sx, y: sy };
+    for (const e of chain) {
+      const to = { x: e.x, y: e.y - 10 };
+      const pts = [from];
+      for (let i = 1; i <= 4; i++) {
+        const t = i / 4;
+        pts.push({
+          x: from.x + (to.x - from.x) * t + (i < 4 ? Phaser.Math.Between(-14, 14) : 0),
+          y: from.y + (to.y - from.y) * t + (i < 4 ? Phaser.Math.Between(-14, 14) : 0),
+        });
+      }
+      segments.push(pts);
+      from = to;
+    }
+
+    const g = this.add.graphics().setDepth(2102);
+    const draw = (width, color, alpha) => {
+      g.lineStyle(width, color, alpha);
+      for (const pts of segments) {
+        for (let i = 1; i < pts.length; i++) {
+          g.lineBetween(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+        }
+      }
+    };
+    draw(branch === 'a' ? 10 : 8, 0x7df9ff, branch === 'a' ? 0.24 : 0.18);
+    draw(5, 0xfff2a8, 0.9);
+    draw(2, 0xffffff, 0.98);
+    this.tweens.add({
+      targets: g,
+      alpha: 0,
+      duration: branch === 'a' ? 240 : 190,
+      ease: 'Quad.Out',
+      onComplete: () => g.destroy(),
+    });
+
+    chain.forEach((e, i) => {
+      this.playLightningHitFx(e.x, e.y, branch === 'a' && i === chain.length - 1);
+    });
+  }
+
+  playLightningHitFx(x, y, strong = false) {
+    const flash = this.add.image(x, y - 8, 'glow')
+      .setTint(strong ? 0x7df9ff : 0xfff2a8)
+      .setAlpha(strong ? 0.62 : 0.42)
+      .setScale(strong ? 0.66 : 0.48)
+      .setDepth(2103);
+    this.tweens.add({
+      targets: flash,
+      scale: strong ? 1.45 : 1.02,
+      alpha: 0,
+      duration: strong ? 260 : 190,
+      ease: 'Cubic.Out',
+      onComplete: () => flash.destroy(),
+    });
+    if (strong) this.burst(x, y, 0x7df9ff, 10, 0.8);
+  }
+
+  playStunRingFx(x, y) {
+    this.playLightningHitFx(x, y, true);
+    const ring = this.add.circle(x, y - 14, 26, 0xfff2a8, 0)
+      .setStrokeStyle(3, 0xfff2a8, 0.82)
+      .setDepth(2105);
+    this.tweens.add({
+      targets: ring,
+      y: y - 24,
+      scale: 1.55,
+      alpha: 0,
+      duration: 360,
+      ease: 'Cubic.Out',
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  playExecuteFx(t, x, y) {
+    const topY = Math.max(-90, y - 560);
+    const h = y - topY + 96;
+    const pillar = this.add.rectangle(x, topY + h / 2, 24, h, 0xfff8dc, 0.28)
+      .setDepth(2114);
+    this.tweens.add({
+      targets: pillar,
+      scaleX: 2.15,
+      alpha: 0,
+      duration: 280,
+      ease: 'Quad.Out',
+      onComplete: () => pillar.destroy(),
+    });
+
+    const core = this.add.image(x, y - 8, 'glow')
+      .setTint(0xfff8dc)
+      .setAlpha(0.86)
+      .setScale(0.74)
+      .setDepth(2115);
+    this.tweens.add({
+      targets: core,
+      scale: 2.2,
+      alpha: 0,
+      duration: 300,
+      ease: 'Cubic.Out',
+      onComplete: () => core.destroy(),
+    });
+
+    const ring = this.add.circle(x, y, 42, 0xfff8dc, 0)
+      .setStrokeStyle(6, 0xfff8dc, 0.86)
+      .setScale(0.2)
+      .setDepth(2116);
+    this.tweens.add({
+      targets: ring,
+      scale: 2.0,
+      alpha: 0,
+      duration: 340,
+      ease: 'Cubic.Out',
+      onComplete: () => ring.destroy(),
+    });
+
+    const motes = this.add.particles(x, y - 10, 'spark', {
+      angle: { min: 235, max: 305 },
+      speed: { min: 110, max: 260 },
+      gravityY: -120,
+      scale: { start: 0.95, end: 0 },
+      lifespan: 560,
+      tint: 0xfff8dc,
+      emitting: false,
+    }).setDepth(2117);
+    motes.explode(28);
+    this.time.delayedCall(720, () => motes.destroy());
+
+    this.cameras.main.shake(130, 0.0035);
+  }
+
+  playJudgementPulseFx(t, global = false) {
+    const x = t.slot.x;
+    const y = t.slot.y - 24;
+    const color = 0xfff8dc;
+    const glow = this.add.image(x, y, 'glow')
+      .setTint(color)
+      .setAlpha(global ? 0.42 : 0.3)
+      .setScale(global ? 1.0 : 0.72)
+      .setDepth(2110);
+    this.tweens.add({
+      targets: glow,
+      scale: global ? 3.0 : 1.65,
+      alpha: 0,
+      duration: global ? 520 : 340,
+      ease: 'Cubic.Out',
+      onComplete: () => glow.destroy(),
+    });
+
+    const ring = this.add.circle(x, y, global ? 72 : 48, color, 0)
+      .setStrokeStyle(global ? 7 : 5, color, global ? 0.76 : 0.64)
+      .setScale(0.18)
+      .setDepth(2111);
+    this.tweens.add({
+      targets: ring,
+      scale: global ? 3.1 : 1.75,
+      alpha: 0,
+      duration: global ? 560 : 360,
+      ease: 'Cubic.Out',
+      onComplete: () => ring.destroy(),
+    });
+
+    if (global) this.screenGlow(color, 0.1);
+  }
+
   mergeBurst(x, y, color, lv = 1) {
     const count = Phaser.Math.Clamp(18 + lv * 3, 22, 40);
     const p = this.add.particles(x, y, 'spark', {

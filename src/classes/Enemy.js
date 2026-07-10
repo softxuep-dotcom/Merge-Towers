@@ -1,9 +1,13 @@
 import { ENEMY_TYPES, ELITE, waveHp, BOSS_AFFIXES, BOSS_CONTROL } from '../config.js';
 import {
-  PAINTED_ENEMY_ATLAS,
+  paintedEnemyAnimationSource,
   paintedEnemyAnimKey,
+  paintedEnemyDirectionFlipX,
+  paintedEnemyFrameKey,
   paintedEnemyFrameTarget,
   paintedEnemyKey,
+  paintedEnemyPlaybackDirection,
+  paintedEnemyTextureKey,
 } from '../textures.js';
 
 // 路径：Catmull-Rom 样条平滑 + 按距离取点（拐弯走圆弧而非折线急转）
@@ -82,9 +86,11 @@ export class Enemy {
     const spriteY = this.flying ? -30 : 0;
     this.shadow = scene.add.image(0, 6, 'shadow').setScale((this.boss ? 1.8 : 0.8) * (this.elite ? 1.25 : 1));
     this.paintedKey = paintedEnemyKey(typeKey);
-    this.usesPaintedSprite = scene.textures.exists(PAINTED_ENEMY_ATLAS) && scene.anims.exists(paintedEnemyAnimKey(this.paintedKey, 'left'));
+    this.paintedAtlasKey = paintedEnemyTextureKey(scene, this.paintedKey);
+    this.usesPaintedSprite = !!this.paintedAtlasKey && !!paintedEnemyAnimationSource(scene, this.paintedKey, 'left');
     if (this.usesPaintedSprite) {
-      this.spr = scene.add.sprite(0, spriteY, PAINTED_ENEMY_ATLAS, `${this.paintedKey}_left_1`);
+      const initialDirection = paintedEnemyAnimationSource(scene, this.paintedKey, 'left');
+      this.spr = scene.add.sprite(0, spriteY, this.paintedAtlasKey, paintedEnemyFrameKey(this.paintedKey, initialDirection, 1));
       const target = paintedEnemyFrameTarget(this.paintedKey, this.type);
       this.spr.setScale(target / this.spr.height);
       const next = path.pointAt(Math.min(path.total, this.progress + 6));
@@ -92,6 +98,7 @@ export class Enemy {
     } else {
       this.spr = scene.add.image(0, spriteY, 'enemy_' + typeKey);
     }
+    this.shadow.y = this.flying ? 8 : spriteY + Math.max(14, this.spr.displayHeight * 0.38);
     const bw = this.boss ? 72 : 42;
     this.barBg = scene.add.rectangle(0, spriteY - this.type.size - 16, bw, 6, 0x000000, 0.55).setVisible(false);
     this.bar = scene.add.rectangle(0, spriteY - this.type.size - 16, bw, 6, 0x8bf05a).setVisible(false);
@@ -135,9 +142,13 @@ export class Enemy {
     return 1 - Phaser.Math.Clamp(this.controlResist || 0, 0, 0.95);
   }
 
-  applySlow(capPct, duration = 2, basePct = 30) {
+  applySlow(capPct, duration = 2, basePct = 30, stackPct = 0) {
     const slowScale = this.controlScale() * (this.rageActive ? this.rageSlowScale : 1);
-    const nextPct = (this.slowPct > 0 ? capPct : basePct) * slowScale;
+    const currentRawPct = slowScale > 0 ? this.slowPct / slowScale : this.slowPct;
+    const rawPct = stackPct > 0
+      ? Math.min(capPct, Math.max(basePct, currentRawPct + stackPct))
+      : (this.slowPct > 0 ? capPct : basePct);
+    const nextPct = rawPct * slowScale;
     this.slowPct = Math.max(this.slowPct, nextPct);
     this.slowT = Math.max(this.slowT, duration);
     this.spr.setTint(0x88ccff);
@@ -330,14 +341,16 @@ export class Enemy {
 
   setFacingByDelta(dx, dy) {
     if (!this.usesPaintedSprite || (Math.abs(dx) < 0.25 && Math.abs(dy) < 0.25)) return;
-    const front = dy > 0 && Math.abs(dy) >= Math.abs(dx) * 0.65;
-    const direction = front ? 'front' : 'left';
-    const animKey = paintedEnemyAnimKey(this.paintedKey, direction);
-    if (this.facingDirection !== direction) {
+    const direction = paintedEnemyPlaybackDirection(dx, dy);
+    if (!direction) return;
+    const sourceDirection = paintedEnemyAnimationSource(this.scene, this.paintedKey, direction);
+    if (!sourceDirection) return;
+    const animKey = paintedEnemyAnimKey(this.paintedKey, sourceDirection);
+    if (this.facingDirection !== direction || this.facingSourceDirection !== sourceDirection) {
       this.facingDirection = direction;
+      this.facingSourceDirection = sourceDirection;
       this.spr.play(animKey);
     }
-    // The atlas stores front + left. Right-facing movement mirrors the left set.
-    this.spr.setFlipX(!front && dx > 0);
+    this.spr.setFlipX(sourceDirection !== 'front' && paintedEnemyDirectionFlipX(direction));
   }
 }

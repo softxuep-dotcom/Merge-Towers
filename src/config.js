@@ -19,11 +19,11 @@ export const TOWER_BRANCHES = {
     b: { key: 'b', cn: '熔核', short: '熔', desc: '单体重炮，攻速减半，伤害与暴击提高' },
   },
   ice: {
-    a: { key: 'a', cn: '冰河', short: '河', desc: '减速上限 70%，命中概率冻结' },
-    b: { key: 'b', cn: '碎冰', short: '碎', desc: '对减速/冻结敌人大幅增伤' },
+    a: { key: 'a', cn: '冰河', short: '河', desc: '20% 霜爆(Lv7 30%)：首次50%范围减速' },
+    b: { key: 'b', cn: '碎冰', short: '碎', desc: '单体攻击，对减速/冻结敌人强力增伤' },
   },
   lightning: {
-    a: { key: 'a', cn: '风暴', short: '暴', desc: '连锁数量增加，链尾伤害翻倍' },
+    a: { key: 'a', cn: '风暴', short: '暴', desc: '连锁数量增加，链尾伤害提高' },
     b: { key: 'b', cn: '雷枢', short: '枢', desc: '命中概率眩晕，受 Boss 抗性修正' },
   },
   poison: {
@@ -40,7 +40,7 @@ export function towerDmg(elem, lv) {
   return ELEMENTS[elem].base * Math.pow(DMG_GROWTH, lv - 1);
 }
 export function towerRange(lv) {
-  return 175 * (1 + 0.1 * Math.floor((lv - 1) / 2));
+  return 200 * (1 + 0.1 * Math.floor((lv - 1) / 2));
 }
 
 // 塔位词缀（GDD §3.8）

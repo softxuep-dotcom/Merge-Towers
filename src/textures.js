@@ -2,8 +2,23 @@
 // Keeps M4 package size tiny while the final hand-painted atlas is still absent.
 import { ELEMENTS, ENEMY_TYPES } from './config.js';
 
-export const PAINTED_ENEMY_ATLAS = 'enemy_atlas';
+export const PAINTED_ENEMY_LEGACY_ATLAS = 'enemy_atlas';
 export const PAINTED_ENEMY_KEYS = ['slime', 'mini', 'runner', 'tank', 'flyer', 'splitter', 'boss'];
+export const PAINTED_ENEMY_SOURCE_DIRECTIONS = ['front', 'left', 'front_left'];
+export const PAINTED_ENEMY_PLAY_DIRECTIONS = ['front', 'left', 'right', 'front_left', 'front_right'];
+export const PAINTED_ENEMY_MIN_FRAMES = 4;
+export const PAINTED_ENEMY_MAX_FRAMES = 8;
+
+const PAINTED_ENEMY_MIRROR_SOURCES = {
+  right: 'left',
+  front_right: 'front_left',
+};
+
+const PAINTED_ENEMY_SOURCE_FALLBACKS = {
+  front: ['front', 'front_left', 'left'],
+  left: ['left', 'front_left', 'front'],
+  front_left: ['front_left', 'left', 'front'],
+};
 
 export function paintedEnemyKey(typeKey) {
   return PAINTED_ENEMY_KEYS.includes(typeKey) ? typeKey : 'slime';
@@ -11,6 +26,76 @@ export function paintedEnemyKey(typeKey) {
 
 export function paintedEnemyAnimKey(typeKey, direction = 'left') {
   return `enemy_${paintedEnemyKey(typeKey)}_${direction}`;
+}
+
+export function paintedEnemyAtlasKey(typeKey) {
+  return `enemy_atlas_${paintedEnemyKey(typeKey)}`;
+}
+
+export function paintedEnemyAtlasImage(typeKey) {
+  return `assets/enemies/enemy-${paintedEnemyKey(typeKey)}-smooth-v1.png`;
+}
+
+export function paintedEnemyAtlasJson(typeKey) {
+  return `assets/enemies/enemy-${paintedEnemyKey(typeKey)}-smooth-v1.json`;
+}
+
+export function paintedEnemyTextureKey(scene, typeKey) {
+  const atlasKey = paintedEnemyAtlasKey(typeKey);
+  if (scene.textures.exists(atlasKey)) return atlasKey;
+  if (scene.textures.exists(PAINTED_ENEMY_LEGACY_ATLAS)) return PAINTED_ENEMY_LEGACY_ATLAS;
+  return null;
+}
+
+export function paintedEnemyFrameKey(typeKey, direction, frame) {
+  return `${paintedEnemyKey(typeKey)}_${direction}_${frame}`;
+}
+
+export function paintedEnemySourceDirection(direction) {
+  return PAINTED_ENEMY_MIRROR_SOURCES[direction] || direction;
+}
+
+export function paintedEnemyDirectionFlipX(direction) {
+  return direction === 'right' || direction === 'front_right';
+}
+
+export function paintedEnemyPlaybackDirection(dx, dy) {
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax < 0.25 && ay < 0.25) return null;
+  if (dy <= 0 && ax < 0.25) return null;
+  if (dy > 0) {
+    if (ax <= ay * 0.45) return 'front';
+    if (ax <= ay * 1.6) return dx > 0 ? 'front_right' : 'front_left';
+  }
+  return dx > 0 ? 'right' : 'left';
+}
+
+export function paintedEnemyFrameNumbers(scene, typeKey, direction) {
+  const textureKey = paintedEnemyTextureKey(scene, typeKey);
+  if (!textureKey) return [];
+  const texture = scene.textures.get(textureKey);
+  const frames = [];
+  for (let i = 1; i <= PAINTED_ENEMY_MAX_FRAMES; i++) {
+    if (!texture?.frames?.[paintedEnemyFrameKey(typeKey, direction, i)]) break;
+    frames.push(i);
+  }
+  return frames;
+}
+
+export function paintedEnemyHasFrames(scene, typeKey, direction) {
+  return paintedEnemyFrameNumbers(scene, typeKey, direction).length >= PAINTED_ENEMY_MIN_FRAMES;
+}
+
+export function paintedEnemyAnimationSource(scene, typeKey, direction) {
+  const source = paintedEnemySourceDirection(direction);
+  const fallbacks = PAINTED_ENEMY_SOURCE_FALLBACKS[source] || [source, 'left', 'front'];
+  return fallbacks.find(candidate => paintedEnemyHasFrames(scene, typeKey, candidate)) || null;
+}
+
+function paintedEnemyFrameRate(typeKey, frameCount) {
+  const cyclesPerSecond = typeKey === 'runner' || typeKey === 'flyer' ? 2.25 : 1.75;
+  return Math.max(1, Math.round(frameCount * cyclesPerSecond));
 }
 
 export function paintedEnemyFrameTarget(typeKey, type) {
@@ -24,15 +109,18 @@ export function paintedEnemyFrameTarget(typeKey, type) {
 }
 
 export function createEnemyAnimations(scene) {
-  if (!scene.textures.exists(PAINTED_ENEMY_ATLAS)) return;
   for (const key of PAINTED_ENEMY_KEYS) {
-    for (const direction of ['front', 'left']) {
+    const textureKey = paintedEnemyTextureKey(scene, key);
+    if (!textureKey) continue;
+    for (const direction of PAINTED_ENEMY_SOURCE_DIRECTIONS) {
+      const frameNumbers = paintedEnemyFrameNumbers(scene, key, direction);
+      if (frameNumbers.length < PAINTED_ENEMY_MIN_FRAMES) continue;
       const animKey = paintedEnemyAnimKey(key, direction);
       if (scene.anims.exists(animKey)) continue;
       scene.anims.create({
         key: animKey,
-        frames: [1, 2, 3, 4].map(i => ({ key: PAINTED_ENEMY_ATLAS, frame: `${key}_${direction}_${i}` })),
-        frameRate: key === 'runner' || key === 'flyer' ? 9 : 7,
+        frames: frameNumbers.map(i => ({ key: textureKey, frame: paintedEnemyFrameKey(key, direction, i) })),
+        frameRate: paintedEnemyFrameRate(key, frameNumbers.length),
         repeat: -1,
       });
     }
