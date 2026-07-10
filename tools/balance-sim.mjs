@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 const cfgSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/config.js'), 'utf8');
 const {
-  waveHp, waveCount, spawnFloor, towerPrice, nonBossSpeedMult,
-  ENEMY_TYPES, ELEMENTS, ELITE, BASE_HP, MAX_LV, DMG_GROWTH,
+  waveHp, waveCount, spawnFloor, towerPrice, nonBossSpeedMult, dmgFactor,
+  ENEMY_TYPES, ELEMENTS, ELITE, BASE_HP, MAX_LV,
 } = await import('data:text/javascript;base64,' + Buffer.from(cfgSrc).toString('base64'));
 
 // ---------- 软参数（战斗抽象模型，锚定校准见 README 注释） ----------
@@ -22,7 +22,7 @@ const AVG_UNIT_DPS = (() => {   // 平均每个 Lv1 等效单位的 DPS（五元
   const es = Object.values(ELEMENTS);
   return es.reduce((s, e) => s + e.base * e.rate, 0) / es.length;
 })();
-const CONSOLIDATION = lv => Math.pow(DMG_GROWTH / 2, lv - 1); // 合成聚合加成 (2.1/2)^n
+const CONSOLIDATION = lv => dmgFactor(lv) / Math.pow(2, lv - 1); // 合成聚合加成：伤害系数/单位数（自动适配分段增长）
 const BRANCH_MULT = 1.25;       // Lv4+ 分支平均战力系数（含腐蚀/碎冰等组合的保守均值）
 const SURGE_BONUS = 0.08;       // 手动玩家的合成冲击等效 DPS 加成
 

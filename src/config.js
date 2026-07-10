@@ -1,7 +1,12 @@
 // 全部平衡数值集中在此，对应 GDD-MergeTowers.md
 export const W = 720, H = 1280;
 export const MAX_LV = 8;
-export const DMG_GROWTH = 2.1;
+// 分段伤害增长（v1.21 定版）：Lv1–3 幼年期 1.9，Lv4–8 段 2.0。
+// Lv8 总量 ≈ base×115.5（v1.20 为 158，原始 2.1^7=180）。
+// 注意：后期段=2.0 时合成的裸 DPS 收益恰好归零（合成塔=两塔之和），
+// 合成动机完全转移到 塔位经济/里程碑/冲击共鸣/射程——设计上有意为之。
+export const DMG_GROWTH_EARLY = 1.9; // Lv1–3
+export const DMG_GROWTH_LATE = 2.0;  // Lv4–8
 
 // 元素定义（GDD §3.2 / §3.3）
 export const ELEMENTS = {
@@ -20,7 +25,7 @@ export const TOWER_BRANCHES = {
   },
   ice: {
     a: { key: 'a', cn: '冰河', short: '河', desc: '20% 霜爆(Lv7 30%)：首次50%范围减速' },
-    b: { key: 'b', cn: '碎冰', short: '碎', desc: '处刑受控：减速目标×2.2，冻结/眩晕×4；普攻不减速' },
+    b: { key: 'b', cn: '碎冰', short: '碎', desc: '处刑受控：减速目标×2.2，冻结/眩晕×4.5；普攻不减速' },
   },
   lightning: {
     a: { key: 'a', cn: '风暴', short: '暴', desc: '连锁数量增加，链尾伤害提高' },
@@ -37,7 +42,13 @@ export const TOWER_BRANCHES = {
 };
 
 export function towerDmg(elem, lv) {
-  return ELEMENTS[elem].base * Math.pow(DMG_GROWTH, lv - 1);
+  const early = Math.pow(DMG_GROWTH_EARLY, Math.min(lv, 3) - 1);
+  const late = Math.pow(DMG_GROWTH_LATE, Math.max(0, lv - 3));
+  return ELEMENTS[elem].base * early * late;
+}
+// 等级伤害系数（与元素无关），供模拟器/展示用
+export function dmgFactor(lv) {
+  return towerDmg('fire', lv) / ELEMENTS.fire.base;
 }
 export function towerRange(lv) {
   return 200 * (1 + 0.1 * Math.floor((lv - 1) / 2));

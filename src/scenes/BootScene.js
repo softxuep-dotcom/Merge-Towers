@@ -21,6 +21,9 @@ export class BootScene extends Phaser.Scene {
     this.load.image('map_bg', 'assets/maps/forest-grid-bg.png');
     this.load.image('vfx_frost_nova', 'assets/vfx/frost-nova-game.png');
     this.load.image('vfx_burning_ground', 'assets/vfx/burning-ground-game.png');
+    this.load.spritesheet('vfx_fire_burst_seq', 'assets/vfx/fire-burst-seq.png', { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('vfx_burn_loop_seq', 'assets/vfx/burn-loop-seq.png', { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('vfx_frost_nova_seq', 'assets/vfx/frost-nova-seq.png', { frameWidth: 320, frameHeight: 320 });
     this.load.atlas(PAINTED_TOWER_ATLAS, PAINTED_TOWER_ATLAS_IMAGE, PAINTED_TOWER_ATLAS_JSON);
     for (const key of PAINTED_ENEMY_KEYS) {
       this.load.atlas(paintedEnemyAtlasKey(key), paintedEnemyAtlasImage(key), paintedEnemyAtlasJson(key));

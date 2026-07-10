@@ -1399,18 +1399,48 @@ export class GameScene extends Phaser.Scene {
       .sort((a, b) => a.progress - b.progress);
     const dps = t.dmg * 0.5 * multiplier;
     const targets = pts.length ? pts : [{ x: t.slot.x, y: t.slot.y, progress: 0 }];
+    const visible = new Set();
+    const visibleN = Math.min(3, targets.length);
+    for (let i = 0; i < visibleN; i++) {
+      visible.add(visibleN === 1 ? 0 : Math.round(i * (targets.length - 1) / (visibleN - 1)));
+    }
+
+    this.playMergeFireTrailFx(targets, t.color);
     targets.forEach((p, i) => {
-      this.time.delayedCall(i * 28, () => {
+      this.time.delayedCall(i * 22, () => {
         if (this.over) return;
+        const showVisual = visible.has(i);
         this.addBurnZone(p.x, p.y, dps, {
           duration: MERGE_SURGE.fireDuration,
           radius: MERGE_SURGE.fireRadius,
           color: t.color,
-          scale: 2.15,
+          visual: false,
           goldMult: t.goldMult,
         });
-        if (i % 2 === 0) this.burst(p.x, p.y, t.color, 5, 0.45);
+        if (showVisual) {
+          this.playFireBurstFx(p.x, p.y, MERGE_SURGE.fireRadius * 1.15, t.color);
+          this.burst(p.x, p.y, t.color, 6, 0.42);
+        }
       });
+    });
+  }
+
+  playMergeFireTrailFx(points, color) {
+    if (points.length < 2) return;
+    const vectors = points.map(p => new Phaser.Math.Vector2(p.x, p.y));
+    const g = this.add.graphics().setDepth(2070);
+    g.lineStyle(14, 0x5f1708, 0.16);
+    g.strokePoints(vectors, false);
+    g.lineStyle(7, color, 0.26);
+    g.strokePoints(vectors, false);
+    g.lineStyle(3, 0xfff1a8, 0.54);
+    g.strokePoints(vectors, false);
+    this.tweens.add({
+      targets: g,
+      alpha: 0,
+      duration: 620,
+      ease: 'Cubic.Out',
+      onComplete: () => g.destroy(),
     });
   }
 
@@ -1900,7 +1930,7 @@ export class GameScene extends Phaser.Scene {
               // 碎冰 v1.18「处刑受控者」：普攻不施加减速——条件由冰河/雷枢/冰冲击提供
               const hardCC = target.frozenT > 0 || target.stunnedT > 0;
               const slowed = target.slowT > 0;
-              const mult = hardCC ? (lv >= 7 ? 5 : 4) : slowed ? this.shatterDamageMult(lv) : 1;
+              const mult = hardCC ? (lv >= 7 ? 5.5 : 4.5) : slowed ? this.shatterDamageMult(lv) : 1;
               const tx = target.x, ty = target.y;
               const real = target.takeDamage(dmg * mult, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
               this.showDmg(tx, ty - 44, hardCC ? `处刑 ${Math.round(real)}` : real, hardCC ? '#e8f6ff' : '#bfe8ff');
@@ -1934,83 +1964,141 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  ensureVfxAnimations() {
+    const defs = [
+      { key: 'vfx_fire_burst_anim', texture: 'vfx_fire_burst_seq', end: 9, frameRate: 26, repeat: 0 },
+      { key: 'vfx_burn_loop_anim', texture: 'vfx_burn_loop_seq', end: 7, frameRate: 10, repeat: -1 },
+      { key: 'vfx_frost_nova_anim', texture: 'vfx_frost_nova_seq', end: 11, frameRate: 24, repeat: 0 },
+    ];
+    for (const def of defs) {
+      if (this.anims.exists(def.key) || !this.textures.exists(def.texture)) continue;
+      this.anims.create({
+        key: def.key,
+        frames: this.anims.generateFrameNumbers(def.texture, { start: 0, end: def.end }),
+        frameRate: def.frameRate,
+        repeat: def.repeat,
+      });
+    }
+  }
+
+  playFireBurstFx(x, y, radius, color = 0xff7733) {
+    this.ensureVfxAnimations();
+    if (!this.textures.exists('vfx_fire_burst_seq') || !this.anims.exists('vfx_fire_burst_anim')) {
+      this.burst(x, y, color, 12, 0.8);
+      return;
+    }
+    const fx = this.add.sprite(x, y, 'vfx_fire_burst_seq')
+      .setAlpha(0.98)
+      .setOrigin(0.5, 0.86)
+      .setScale((radius * 3.05) / 256)
+      .setAngle(Phaser.Math.Between(-16, 16))
+      .setDepth(2100);
+    fx.play('vfx_fire_burst_anim');
+    fx.once('animationcomplete', () => fx.destroy());
+  }
+
   addBurnZone(x, y, dps, opts = {}) {
     const duration = opts.duration ?? 2;
     const radius = opts.radius ?? 58;
-    const texture = this.textures.exists('vfx_burning_ground') ? 'vfx_burning_ground' : 'glow';
-    const scale = texture === 'vfx_burning_ground'
-      ? (radius * 2.65) / 512
-      : (opts.scale ?? 1.8);
-    const img = this.add.image(x, y, texture)
-      .setAlpha(0)
-      .setScale(scale * 0.86)
-      .setAngle(Phaser.Math.Between(-18, 18))
-      .setDepth(100);
-    if (texture === 'glow') img.setTint(opts.color ?? 0xff7733);
-    this.tweens.add({
-      targets: img,
-      alpha: texture === 'vfx_burning_ground' ? 0.88 : 0.55,
-      scale: scale,
-      duration: 180,
-      ease: 'Cubic.Out',
-    });
-    this.tweens.add({
-      targets: img,
-      alpha: texture === 'vfx_burning_ground' ? 0.68 : 0.42,
-      scale: scale * 1.04,
-      delay: 180,
-      duration: 520,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.InOut',
-    });
+    let img = null;
+    if (opts.visual !== false) {
+      this.ensureVfxAnimations();
+      const texture = this.textures.exists('vfx_burn_loop_seq')
+        ? 'vfx_burn_loop_seq'
+        : this.textures.exists('vfx_burning_ground') ? 'vfx_burning_ground' : 'glow';
+      const visualRadius = opts.visualRadius ?? radius;
+      const scale = opts.visualScale ?? (
+        texture === 'vfx_burn_loop_seq'
+          ? (visualRadius * (opts.visualScaleMult ?? 2.1)) / 256
+          : texture === 'vfx_burning_ground'
+          ? (visualRadius * (opts.visualScaleMult ?? 2.35)) / 512
+          : (opts.scale ?? 1.8)
+      );
+      const targetAlpha = opts.alpha ?? (texture === 'glow' ? 0.55 : 0.78);
+      img = texture === 'vfx_burn_loop_seq'
+        ? this.add.sprite(x, y, texture)
+        : this.add.image(x, y, texture);
+      img
+        .setAlpha(0)
+        .setScale(scale * 0.82)
+        .setAngle(Phaser.Math.Between(-18, 18))
+        .setDepth(opts.depth ?? 100);
+      if (texture === 'vfx_burn_loop_seq' && this.anims.exists('vfx_burn_loop_anim')) img.play('vfx_burn_loop_anim');
+      if (texture === 'glow') img.setTint(opts.color ?? 0xff7733);
+      this.tweens.add({
+        targets: img,
+        alpha: targetAlpha,
+        scale,
+        duration: 160,
+        ease: 'Cubic.Out',
+      });
+      this.tweens.add({
+        targets: img,
+        alpha: targetAlpha * 0.76,
+        scale: scale * 1.035,
+        delay: 160,
+        duration: 520,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.InOut',
+      });
+    }
     this.burnZones.push({ x, y, dps, t: duration, img, tick: 0, radius, goldMult: opts.goldMult || 1, sourceBonus: opts.sourceBonus || 0 });
   }
 
   // ================= 特效工具 =================
   playFrostNovaFx(x, y, radius, strong = false) {
-    if (!this.textures.exists('vfx_frost_nova')) {
+    this.ensureVfxAnimations();
+    if (this.textures.exists('vfx_frost_nova_seq') && this.anims.exists('vfx_frost_nova_anim')) {
+      const baseScale = (radius * (strong ? 2.85 : 2.55)) / 320;
+      const nova = this.add.sprite(x, y, 'vfx_frost_nova_seq')
+        .setAlpha(strong ? 0.98 : 0.92)
+        .setScale(baseScale)
+        .setAngle(Phaser.Math.Between(-18, 18))
+        .setDepth(2092);
+      nova.play('vfx_frost_nova_anim');
+      nova.once('animationcomplete', () => nova.destroy());
+    } else if (!this.textures.exists('vfx_frost_nova')) {
       this.burst(x, y, 0xbfe8ff, strong ? 54 : 38, strong ? 1.45 : 1.1);
-      return;
+    } else {
+      const baseScale = (radius * (strong ? 2.85 : 2.55)) / 512;
+      const nova = this.add.image(x, y, 'vfx_frost_nova')
+        .setAlpha(0)
+        .setScale(baseScale * 0.28)
+        .setAngle(Phaser.Math.Between(-18, 18))
+        .setDepth(2092);
+      this.tweens.add({
+        targets: nova,
+        alpha: strong ? 0.98 : 0.9,
+        scale: baseScale,
+        duration: 170,
+        ease: 'Back.Out',
+        onComplete: () => {
+          this.tweens.add({
+            targets: nova,
+            alpha: 0,
+            scale: baseScale * 1.08,
+            duration: strong ? 540 : 440,
+            ease: 'Sine.Out',
+            onComplete: () => nova.destroy(),
+          });
+        },
+      });
+
+      const afterImage = this.add.image(x, y, 'vfx_frost_nova')
+        .setAlpha(strong ? 0.28 : 0.2)
+        .setScale(baseScale * 0.9)
+        .setAngle(nova.angle + 30)
+        .setDepth(2089);
+      this.tweens.add({
+        targets: afterImage,
+        alpha: 0,
+        scale: baseScale * 1.34,
+        duration: strong ? 760 : 620,
+        ease: 'Cubic.Out',
+        onComplete: () => afterImage.destroy(),
+      });
     }
-
-    const baseScale = (radius * (strong ? 2.85 : 2.55)) / 512;
-    const nova = this.add.image(x, y, 'vfx_frost_nova')
-      .setAlpha(0)
-      .setScale(baseScale * 0.28)
-      .setAngle(Phaser.Math.Between(-18, 18))
-      .setDepth(2092);
-    this.tweens.add({
-      targets: nova,
-      alpha: strong ? 0.98 : 0.9,
-      scale: baseScale,
-      duration: 170,
-      ease: 'Back.Out',
-      onComplete: () => {
-        this.tweens.add({
-          targets: nova,
-          alpha: 0,
-          scale: baseScale * 1.08,
-          duration: strong ? 540 : 440,
-          ease: 'Sine.Out',
-          onComplete: () => nova.destroy(),
-        });
-      },
-    });
-
-    const afterImage = this.add.image(x, y, 'vfx_frost_nova')
-      .setAlpha(strong ? 0.28 : 0.2)
-      .setScale(baseScale * 0.9)
-      .setAngle(nova.angle + 30)
-      .setDepth(2089);
-    this.tweens.add({
-      targets: afterImage,
-      alpha: 0,
-      scale: baseScale * 1.34,
-      duration: strong ? 760 : 620,
-      ease: 'Cubic.Out',
-      onComplete: () => afterImage.destroy(),
-    });
 
     const core = this.add.image(x, y, 'glow')
       .setTint(0xffffff)
@@ -2924,8 +3012,10 @@ export class GameScene extends Phaser.Scene {
         }
       }
       if (z.t <= 0) {
-        this.tweens.killTweensOf(z.img);
-        z.img.destroy();
+        if (z.img) {
+          this.tweens.killTweensOf(z.img);
+          z.img.destroy();
+        }
       }
     }
     this.burnZones = this.burnZones.filter(z => z.t > 0);
