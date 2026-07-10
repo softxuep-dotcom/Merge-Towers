@@ -107,6 +107,11 @@ export class GameScene extends Phaser.Scene {
     this.time.addEvent({ delay: 600, loop: true, callback: () => this.autoBuyTick() });
     this.time.addEvent({ delay: 800, loop: true, callback: () => this.autoMergeTick() });
 
+    // 开发工具：?editor=1 进入点击式路径编辑器（见 src/dev/pathEditor.js）
+    if (new URLSearchParams(window.location.search).has('editor')) {
+      import('../dev/pathEditor.js').then(m => m.startPathEditor(this));
+      return;
+    }
     Poki.gameplayStart();
     this.startPrep();
   }
@@ -1545,12 +1550,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   autoBuyTick() {
-    if (!tier(this.S, 'autoBuy') || this.over || this.dying || this.evolutionChoiceOpen) return;
+    if (!tier(this.S, 'autoBuy') || this.over || this.dying || this.evolutionChoiceOpen || this.editorMode) return;
     this.buyTower(true);
   }
 
   autoMergeTick() {
-    if (!tier(this.S, 'autoMerge') || this.over || this.dying || this.evolutionChoiceOpen) return;
+    if (!tier(this.S, 'autoMerge') || this.over || this.dying || this.evolutionChoiceOpen || this.editorMode) return;
     // 找最高等级的可合成对
     const groups = {};
     for (const t of this.towers) {
@@ -2372,7 +2377,7 @@ export class GameScene extends Phaser.Scene {
   // ================= 主循环 =================
   update(time, delta) {
     this.ensureResponsiveLayout();
-    if (this.over) return;
+    if (this.over || this.editorMode) return;
     let dts = (delta / 1000) * this.speedMult;
     if (this.lastStandActive) this.updateLastStand(delta / 1000);
     // 慢镜（按真实时间衰减）

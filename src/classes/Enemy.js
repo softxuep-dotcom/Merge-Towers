@@ -6,14 +6,21 @@ import {
   paintedEnemyKey,
 } from '../textures.js';
 
-// 路径：折线 + 按距离取点
+// 路径：Catmull-Rom 样条平滑 + 按距离取点（拐弯走圆弧而非折线急转）
 export class Path {
   constructor(points) {
-    this.pts = points;
+    this.raw = points;
+    let pts = points;
+    if (points.length >= 3) {
+      const spline = new Phaser.Curves.Spline(points.flatMap(p => [p.x, p.y]));
+      pts = spline.getSpacedPoints(Math.max(32, Math.round(spline.getLength() / 10)))
+        .map(v => ({ x: v.x, y: v.y }));
+    }
+    this.pts = pts;
     this.lens = [];
     this.total = 0;
-    for (let i = 1; i < points.length; i++) {
-      const d = Phaser.Math.Distance.Between(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
+    for (let i = 1; i < pts.length; i++) {
+      const d = Phaser.Math.Distance.Between(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
       this.lens.push(d);
       this.total += d;
     }
