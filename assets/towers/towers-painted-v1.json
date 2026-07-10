@@ -1,0 +1,315 @@
+{
+  "frames": {
+    "fire_base": {
+      "frame": {
+        "x": 2,
+        "y": 2,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "ice_base": {
+      "frame": {
+        "x": 260,
+        "y": 2,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "lightning_base": {
+      "frame": {
+        "x": 518,
+        "y": 2,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "poison_base": {
+      "frame": {
+        "x": 776,
+        "y": 2,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "light_base": {
+      "frame": {
+        "x": 1034,
+        "y": 2,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "fire_explosive_a": {
+      "frame": {
+        "x": 2,
+        "y": 304,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "ice_glacier_a": {
+      "frame": {
+        "x": 260,
+        "y": 304,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "lightning_storm_a": {
+      "frame": {
+        "x": 518,
+        "y": 304,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "poison_plague_a": {
+      "frame": {
+        "x": 776,
+        "y": 304,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "light_judgement_a": {
+      "frame": {
+        "x": 1034,
+        "y": 304,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "fire_molten_core_b": {
+      "frame": {
+        "x": 2,
+        "y": 606,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "ice_shatter_b": {
+      "frame": {
+        "x": 260,
+        "y": 606,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "lightning_stun_node_b": {
+      "frame": {
+        "x": 518,
+        "y": 606,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "poison_corrosion_b": {
+      "frame": {
+        "x": 776,
+        "y": 606,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    },
+    "light_radiance_b": {
+      "frame": {
+        "x": 1034,
+        "y": 606,
+        "w": 256,
+        "h": 300
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 300
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 300
+      }
+    }
+  },
+  "meta": {
+    "app": "Codex painted tower atlas packer",
+    "version": "1.0",
+    "image": "towers-painted-v1.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 1292,
+      "h": 908
+    },
+    "scale": "1"
+  }
+}

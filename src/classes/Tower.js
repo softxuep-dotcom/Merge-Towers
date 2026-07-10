@@ -1,4 +1,5 @@
 import { ELEMENTS, MAX_LV, TOWER_BRANCHES, towerDmg, towerRange } from '../config.js';
+import { addTowerImage, applyTowerImage, fitTowerImageHeight } from '../textures.js';
 
 export class Tower {
   constructor(scene, slot, elem, lv, branch = null) {
@@ -20,7 +21,11 @@ export class Tower {
       .setAlpha(0)
       .setScale(1.05)
       .setVisible(false);
-    this.spr = scene.add.image(0, -22, 'tower_' + elem).setScale(0.85 + lv * 0.07);
+    this.targetSpriteHeight = 106 * (0.85 + lv * 0.07);
+    this.spr = fitTowerImageHeight(
+      addTowerImage(scene, 0, -22, elem, lv, this.branch),
+      this.targetSpriteHeight,
+    );
     this.badge = scene.add.circle(20, 8, 13, 0x1c1f2e, 0.92).setStrokeStyle(2, e.color);
     this.lvText = scene.add.text(20, 8, String(lv), {
       fontFamily: 'Arial Black, sans-serif', fontSize: '16px', color: '#ffffff',
@@ -70,8 +75,14 @@ export class Tower {
     return TOWER_BRANCHES[this.elem]?.[this.branch]?.short || '?';
   }
 
+  refreshVisual() {
+    applyTowerImage(this.spr, this.scene, this.elem, this.lv, this.branch);
+    fitTowerImageHeight(this.spr, this.targetSpriteHeight);
+  }
+
   setBranch(branch) {
     this.branch = this.lv >= 4 ? branch : null;
+    this.refreshVisual();
     if (!this.branchText) return;
     this.branchText.setText(this.branchLabel());
     this.branchText.setColor(this.branch ? '#ffffff' : '#ffe97a');

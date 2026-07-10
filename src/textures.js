@@ -2,11 +2,57 @@
 // Keeps M4 package size tiny while the final hand-painted atlas is still absent.
 import { ELEMENTS, ENEMY_TYPES } from './config.js';
 
+export const PAINTED_TOWER_ATLAS = 'tower_atlas_painted';
+export const PAINTED_TOWER_ATLAS_IMAGE = 'assets/towers/towers-painted-v1.png';
+export const PAINTED_TOWER_ATLAS_JSON = 'assets/towers/towers-painted-v1.json';
+
+const PAINTED_TOWER_FRAMES = {
+  fire: { base: 'fire_base', a: 'fire_explosive_a', b: 'fire_molten_core_b' },
+  ice: { base: 'ice_base', a: 'ice_glacier_a', b: 'ice_shatter_b' },
+  lightning: { base: 'lightning_base', a: 'lightning_storm_a', b: 'lightning_stun_node_b' },
+  poison: { base: 'poison_base', a: 'poison_plague_a', b: 'poison_corrosion_b' },
+  light: { base: 'light_base', a: 'light_judgement_a', b: 'light_radiance_b' },
+};
+
+export function paintedTowerFrameKey(element, level = 1, branch = null) {
+  const variant = level >= 4 && (branch === 'a' || branch === 'b') ? branch : 'base';
+  return PAINTED_TOWER_FRAMES[element]?.[variant] || PAINTED_TOWER_FRAMES[element]?.base || null;
+}
+
+export function towerTextureSpec(scene, element, level = 1, branch = null) {
+  const frame = paintedTowerFrameKey(element, level, branch);
+  const texture = scene.textures.exists(PAINTED_TOWER_ATLAS)
+    ? scene.textures.get(PAINTED_TOWER_ATLAS)
+    : null;
+  if (frame && texture?.frames?.[frame]) {
+    return { key: PAINTED_TOWER_ATLAS, frame, painted: true };
+  }
+  return { key: `tower_${element}`, frame: null, painted: false };
+}
+
+export function addTowerImage(scene, x, y, element, level = 1, branch = null) {
+  const spec = towerTextureSpec(scene, element, level, branch);
+  return spec.frame
+    ? scene.add.image(x, y, spec.key, spec.frame)
+    : scene.add.image(x, y, spec.key);
+}
+
+export function applyTowerImage(image, scene, element, level = 1, branch = null) {
+  const spec = towerTextureSpec(scene, element, level, branch);
+  if (spec.frame) image.setTexture(spec.key, spec.frame);
+  else image.setTexture(spec.key);
+  return image;
+}
+
+export function fitTowerImageHeight(image, displayHeight) {
+  return image.setScale(displayHeight / image.height);
+}
+
 export const PAINTED_ENEMY_LEGACY_ATLAS = 'enemy_atlas';
 export const PAINTED_ENEMY_KEYS = ['slime', 'mini', 'runner', 'tank', 'flyer', 'splitter', 'boss'];
 export const PAINTED_ENEMY_SOURCE_DIRECTIONS = ['front', 'left', 'front_left'];
 export const PAINTED_ENEMY_PLAY_DIRECTIONS = ['front', 'left', 'right', 'front_left', 'front_right'];
-export const PAINTED_ENEMY_MIN_FRAMES = 4;
+export const PAINTED_ENEMY_MIN_FRAMES = 5;
 export const PAINTED_ENEMY_MAX_FRAMES = 8;
 
 const PAINTED_ENEMY_MIRROR_SOURCES = {
@@ -33,11 +79,11 @@ export function paintedEnemyAtlasKey(typeKey) {
 }
 
 export function paintedEnemyAtlasImage(typeKey) {
-  return `assets/enemies/enemy-${paintedEnemyKey(typeKey)}-smooth-v1.png`;
+  return `assets/enemies/enemy-${paintedEnemyKey(typeKey)}-smooth-v2.png`;
 }
 
 export function paintedEnemyAtlasJson(typeKey) {
-  return `assets/enemies/enemy-${paintedEnemyKey(typeKey)}-smooth-v1.json`;
+  return `assets/enemies/enemy-${paintedEnemyKey(typeKey)}-smooth-v2.json`;
 }
 
 export function paintedEnemyTextureKey(scene, typeKey) {
@@ -375,6 +421,15 @@ export function generateTextures(scene) {
   g.fillStyle(0xffffff, 1);
   g.fillCircle(6, 6, 6);
   g.generateTexture('spark', 12, 12);
+
+  g.clear();
+  g.fillStyle(0x9fe8ff, 0.94);
+  g.fillPoints(p([[9, 0], [16, 8], [12, 25], [9, 28], [6, 25], [2, 8]]), true);
+  g.fillStyle(0xffffff, 0.68);
+  g.fillPoints(p([[9, 3], [12, 9], [9, 23], [6, 9]]), true);
+  g.lineStyle(1, 0x4fc3ff, 0.55);
+  g.strokePoints(p([[9, 0], [16, 8], [12, 25], [9, 28], [6, 25], [2, 8]]), true, true);
+  g.generateTexture('ice_shard', 18, 30);
 
   g.clear();
   g.fillStyle(0xffffff, 1);

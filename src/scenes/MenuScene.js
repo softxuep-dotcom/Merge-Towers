@@ -3,6 +3,7 @@ import { makeButton, toast, openShop } from '../ui.js';
 import { writeSave } from '../save.js';
 import { Sfx } from '../audio.js';
 import { Poki } from '../poki.js';
+import { addTowerImage, fitTowerImageHeight } from '../textures.js';
 
 export class MenuScene extends Phaser.Scene {
   constructor() { super('Menu'); }
@@ -13,7 +14,7 @@ export class MenuScene extends Phaser.Scene {
     // 背景装饰塔
     const elems = Object.keys(ELEMENTS);
     for (let i = 0; i < 5; i++) {
-      const img = this.add.image(90 + i * 135, 900, 'tower_' + elems[i]).setScale(1.1).setAlpha(0.9);
+      const img = fitTowerImageHeight(addTowerImage(this, 90 + i * 135, 900, elems[i]), 117).setAlpha(0.9);
       this.tweens.add({ targets: img, y: 890, duration: 1200 + i * 150, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
     }
 

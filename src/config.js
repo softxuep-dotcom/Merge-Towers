@@ -20,7 +20,7 @@ export const TOWER_BRANCHES = {
   },
   ice: {
     a: { key: 'a', cn: '冰河', short: '河', desc: '20% 霜爆(Lv7 30%)：首次50%范围减速' },
-    b: { key: 'b', cn: '碎冰', short: '碎', desc: '单体攻击，对减速/冻结敌人强力增伤' },
+    b: { key: 'b', cn: '碎冰', short: '碎', desc: '处刑受控：减速目标×2.2，冻结/眩晕×4；普攻不减速' },
   },
   lightning: {
     a: { key: 'a', cn: '风暴', short: '暴', desc: '连锁数量增加，链尾伤害提高' },

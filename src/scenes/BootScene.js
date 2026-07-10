@@ -2,6 +2,9 @@ import {
   createEnemyAnimations,
   generateTextures,
   PAINTED_ENEMY_KEYS,
+  PAINTED_TOWER_ATLAS,
+  PAINTED_TOWER_ATLAS_IMAGE,
+  PAINTED_TOWER_ATLAS_JSON,
   paintedEnemyAtlasImage,
   paintedEnemyAtlasJson,
   paintedEnemyAtlasKey,
@@ -16,6 +19,9 @@ export class BootScene extends Phaser.Scene {
   preload() {
     // 森林背景图（可选资源：缺失时回退程序化绘制）
     this.load.image('map_bg', 'assets/maps/forest-grid-bg.png');
+    this.load.image('vfx_frost_nova', 'assets/vfx/frost-nova-game.png');
+    this.load.image('vfx_burning_ground', 'assets/vfx/burning-ground-game.png');
+    this.load.atlas(PAINTED_TOWER_ATLAS, PAINTED_TOWER_ATLAS_IMAGE, PAINTED_TOWER_ATLAS_JSON);
     for (const key of PAINTED_ENEMY_KEYS) {
       this.load.atlas(paintedEnemyAtlasKey(key), paintedEnemyAtlasImage(key), paintedEnemyAtlasJson(key));
     }

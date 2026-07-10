@@ -13,6 +13,7 @@ import {
 } from '../audio.js';
 import { Poki } from '../poki.js';
 import { writeSave, tier, unlockedElements } from '../save.js';
+import { addTowerImage, fitTowerImageHeight } from '../textures.js';
 
 // 地面路径（行进式像素描迹校准到石板路中轴线，2026-07-09）
 const PATH_PTS = [
@@ -766,9 +767,9 @@ export class GameScene extends Phaser.Scene {
         this.spawnEnemy('mini', { progress: e.progress + Phaser.Math.Between(-28, 28) });
       }
     }
-    // 瘟疫分支尸爆传染（GDD §3.5）
-    if (cause === 'poison' && e.poisons.some(p => p.plague)) {
-      const src = e.poisons.find(p => p.plague);
+    // 瘟疫分支尸爆传染（GDD §3.5 v1.19：中毒状态下死亡即触发，不限死因——主C抢人头也算瘟疫的）
+    if (e.poisons.some(p => p.t > 0 && p.plague)) {
+      const src = e.poisons.find(p => p.t > 0 && p.plague);
       const radius = src.plagueRadius || 95;
       const infected = [];
       for (const o of this.enemies) {
@@ -842,9 +843,13 @@ export class GameScene extends Phaser.Scene {
 
   buildTowerChoices(spawnLv) {
     const unlocked = unlockedElements(this.S, this.wave);
+    const choiceCount = spawnLv >= 4 ? 5 : 3;
     const choices = [];
-    const add = elem => {
-      if (elem && unlocked.includes(elem) && !choices.includes(elem)) choices.push(elem);
+    const add = (elem, branch = null) => {
+      if (!elem || !unlocked.includes(elem)) return;
+      const resolvedBranch = spawnLv >= 4 ? (branch || this.randomBranch(elem)) : null;
+      if (choices.some(choice => choice.elem === elem && choice.branch === resolvedBranch)) return;
+      choices.push({ elem, branch: resolvedBranch });
     };
 
     const counts = {};
@@ -862,10 +867,21 @@ export class GameScene extends Phaser.Scene {
 
     const shuffled = Phaser.Utils.Array.Shuffle(unlocked.slice());
     for (const elem of shuffled) {
-      if (choices.length >= 3) break;
+      if (choices.length >= choiceCount) break;
       add(elem);
     }
-    return choices.slice(0, 3);
+
+    // Lv4+ 的卡片包含分支；元素不足 5 种时，用同元素的另一分支补足，仍保证五张卡不重复。
+    if (spawnLv >= 4 && choices.length < choiceCount) {
+      const branchChoices = Phaser.Utils.Array.Shuffle(unlocked.flatMap(elem =>
+        Object.keys(TOWER_BRANCHES[elem] || {}).map(branch => ({ elem, branch }))
+      ));
+      for (const choice of branchChoices) {
+        if (choices.length >= choiceCount) break;
+        add(choice.elem, choice.branch);
+      }
+    }
+    return choices.slice(0, choiceCount);
   }
 
   randomBranch(elem) {
@@ -912,10 +928,11 @@ export class GameScene extends Phaser.Scene {
     const wide = this.layout.landscape;
     const sideCenterScreen = this.layout.fieldAreaW + this.layout.sidebarW / 2;
     const centerX = wide ? this.layout.x(sideCenterScreen) : W / 2;
-    const panelY = wide ? 350 : 1010;
+    const expanded = choices.length > 3;
+    const panelY = wide ? (expanded ? 382 : 350) : (expanded ? 990 : 1010);
     const panelW = wide ? this.layout.sidebarW - 46 : 650;
-    const panelH = wide ? 286 : 160;
-    const titleY = wide ? 214 : 940;
+    const panelH = wide ? (expanded ? 370 : 286) : (expanded ? 465 : 160);
+    const titleY = wide ? 214 : (expanded ? 785 : 940);
     const cancelX = wide ? this.layout.x(this.layout.fieldAreaW + this.layout.sidebarW - 66) : 650;
     const cancelY = titleY;
 
@@ -933,7 +950,7 @@ export class GameScene extends Phaser.Scene {
       .setInteractive();
     const panel = this.add.rectangle(centerX, panelY, panelW, panelH, 0x171b29, 0.94)
       .setStrokeStyle(2, 0x4a5578);
-    const title = this.uiText(centerX, titleY, `选择新塔  Lv${lv}  💰${cost}`, wide ? 22 : 24, '#ffe97a')
+    const title = this.uiText(centerX, titleY, `选择新塔（${choices.length}选1）  Lv${lv}  💰${cost}`, wide ? 22 : 24, '#ffe97a')
       .setOrigin(0.5);
     const cancel = makeButton(this, cancelX, cancelY, 82, 42, '取消', {
       bg: 0x51586e,
@@ -942,25 +959,38 @@ export class GameScene extends Phaser.Scene {
     });
     layer.add([blocker, panel, title, cancel]);
 
-    const xs = wide ? choices.map(() => centerX) : (choices.length === 2 ? [260, 460] : [160, 360, 560]);
-    choices.forEach((elem, i) => {
+    const portraitPositions = expanded
+      ? choices.map((_, i) => ({ x: W / 2, y: 845 + i * 72 }))
+      : (choices.length === 2
+          ? [{ x: 260, y: 1020 }, { x: 460, y: 1020 }]
+          : [{ x: 160, y: 1020 }, { x: 360, y: 1020 }, { x: 560, y: 1020 }]);
+    choices.forEach((choice, i) => {
+      const { elem, branch } = choice;
       const def = ELEMENTS[elem];
-      // Lv4+ 的分支在发牌时就摇定并印在卡面上（规则透明，玩家点卡前可见血统）
-      const branch = lv >= 4 ? this.randomBranch(elem) : null;
+      // Lv4+ 的分支在发牌时已经摇定并印在卡面上（规则透明，玩家点卡前可见血统）
       const bdef = branch ? TOWER_BRANCHES[elem][branch] : null;
-      const x = xs[i];
-      const card = this.add.container(x, wide ? 288 + i * 78 : 1020);
-      const bg = this.add.rectangle(0, 0, wide ? panelW - 54 : 178, wide ? 64 : 96, 0x23283a, 1)
+      const x = wide ? centerX : portraitPositions[i].x;
+      const y = wide ? (expanded ? 266 + i * 66 : 288 + i * 78) : portraitPositions[i].y;
+      const card = this.add.container(x, y);
+      const listCard = wide || expanded;
+      const cardW = wide ? panelW - 54 : (expanded ? panelW - 80 : 178);
+      const cardH = listCard ? 64 : 96;
+      const iconX = listCard ? -cardW / 2 + 36 : -56;
+      const textX = listCard ? -cardW / 2 + 76 : -18;
+      const bg = this.add.rectangle(0, 0, cardW, cardH, 0x23283a, 1)
         .setStrokeStyle(3, def.color, 0.9);
-      const glow = this.add.image(wide ? -118 : -56, wide ? 0 : -18, 'glow').setTint(def.color).setAlpha(0.34).setScale(wide ? 0.6 : 0.72);
-      const icon = this.add.image(wide ? -118 : -56, wide ? 4 : -12, 'tower_' + elem).setScale(wide ? 0.5 : 0.62);
-      const name = this.uiText(wide ? -78 : -18, wide ? -16 : -22,
-        bdef ? `${def.cn}·${bdef.cn}` : def.cn, wide ? 24 : 28, this.hexColor(def.color)).setOrigin(0, 0.5);
-      const desc = this.uiText(wide ? -78 : -18, wide ? 17 : 20,
-        bdef ? bdef.desc : def.desc, wide ? 16 : 18, '#c9d2f0').setOrigin(0, 0.5);
-      if (bdef) desc.setWordWrapWidth(wide ? panelW - 130 : 130);
+      const glow = this.add.image(iconX, listCard ? 0 : -18, 'glow').setTint(def.color).setAlpha(0.34).setScale(listCard ? 0.6 : 0.72);
+      const icon = fitTowerImageHeight(
+        addTowerImage(this, iconX, listCard ? 4 : -12, elem, lv, branch),
+        listCard ? 54 : 68,
+      );
+      const name = this.uiText(textX, listCard ? -16 : -22,
+        bdef ? `${def.cn}·${bdef.cn}` : def.cn, listCard ? 24 : 28, this.hexColor(def.color)).setOrigin(0, 0.5);
+      const desc = this.uiText(textX, listCard ? 17 : 20,
+        bdef ? bdef.desc : def.desc, listCard ? 16 : 18, '#c9d2f0').setOrigin(0, 0.5);
+      if (bdef) desc.setWordWrapWidth(listCard ? cardW - 92 : 130);
       card.add([bg, glow, icon, name, desc]);
-      card.setSize(wide ? panelW - 54 : 178, wide ? 64 : 96).setInteractive({ useHandCursor: true });
+      card.setSize(cardW, cardH).setInteractive({ useHandCursor: true });
       card.on('pointerover', () => bg.setFillStyle(0x30364d));
       card.on('pointerout', () => bg.setFillStyle(0x23283a));
       card.on('pointerdown', () => this.beginTowerPlacement(elem, lv, cost, branch));
@@ -1199,9 +1229,10 @@ export class GameScene extends Phaser.Scene {
       const card = this.add.rectangle(x, 615, 270, 270, 0x1e2233, 0.96)
         .setStrokeStyle(3, t.color, 0.92)
         .setInteractive({ useHandCursor: true });
-      const badge = this.add.circle(x, 520, 30, t.color, 0.28).setStrokeStyle(3, t.color, 0.9);
-      const short = this.uiText(x, 520, def.short, 30, '#ffffff').setOrigin(0.5);
-      const name = this.uiText(x, 575, def.cn, 30, '#ffe97a').setOrigin(0.5);
+      const icon = fitTowerImageHeight(addTowerImage(this, x, 520, t.elem, t.lv, branch), 112).setDepth(4101);
+      const badge = this.add.circle(x - 100, 500, 21, t.color, 0.36).setStrokeStyle(2, t.color, 0.95);
+      const short = this.uiText(x - 100, 500, def.short, 20, '#ffffff').setOrigin(0.5);
+      const name = this.uiText(x, 590, def.cn, 30, '#ffe97a').setOrigin(0.5);
       const desc = this.add.text(x, 645, def.desc, {
         fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
         fontSize: '22px',
@@ -1216,7 +1247,7 @@ export class GameScene extends Phaser.Scene {
       card.on('pointerdown', () => choose(branch));
       card.on('pointerover', () => card.setFillStyle(0x2b3150, 1));
       card.on('pointerout', () => card.setFillStyle(0x1e2233, 0.96));
-      for (const obj of [card, badge, short, name, desc, pick]) layer.add(obj);
+      for (const obj of [card, icon, badge, short, name, desc, pick]) layer.add(obj);
     };
 
     addCard(215, 'a');
@@ -1709,8 +1740,9 @@ export class GameScene extends Phaser.Scene {
     let bonus = 0;
     for (const aura of this.towers) {
       if (aura === t || aura.elem !== 'light' || aura.branch !== 'b' || aura.lv < 4) continue;
+      // v1.19：230→170，圣辉从"全队常驻"收敛为"罩 3~4 塔的站位决策"，与塔位词缀联动
       const d = Phaser.Math.Distance.Between(aura.slot.x, aura.slot.y, t.slot.x, t.slot.y);
-      if (d <= 230) bonus += aura.lv >= 7 ? 0.3 : 0.2;
+      if (d <= 170) bonus += aura.lv >= 7 ? 0.3 : 0.2;
     }
     return Math.min(1, bonus);
   }
@@ -1864,10 +1896,19 @@ export class GameScene extends Phaser.Scene {
                 return;
               }
             }
-            const shatter = branch === 'b' && (target.slowT > 0 || target.frozenT > 0);
+            if (branch === 'b') {
+              // 碎冰 v1.18「处刑受控者」：普攻不施加减速——条件由冰河/雷枢/冰冲击提供
+              const hardCC = target.frozenT > 0 || target.stunnedT > 0;
+              const slowed = target.slowT > 0;
+              const mult = hardCC ? (lv >= 7 ? 5 : 4) : slowed ? this.shatterDamageMult(lv) : 1;
+              const tx = target.x, ty = target.y;
+              const real = target.takeDamage(dmg * mult, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
+              this.showDmg(tx, ty - 44, hardCC ? `处刑 ${Math.round(real)}` : real, hardCC ? '#e8f6ff' : '#bfe8ff');
+              if (hardCC) this.burst(tx, ty, 0xbfe8ff, 16, 1.15);
+              return;
+            }
             const tx = target.x, ty = target.y;
-            const hit = dmg * (shatter ? this.shatterDamageMult(lv) : 1);
-            const real = target.takeDamage(hit, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
+            const real = target.takeDamage(dmg, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
             this.showDmg(tx, ty - 40, real, '#bfe8ff');
             if (!target.dead) target.applySlow(slowCap, 2, 20, 20);
           }
@@ -1896,102 +1937,107 @@ export class GameScene extends Phaser.Scene {
   addBurnZone(x, y, dps, opts = {}) {
     const duration = opts.duration ?? 2;
     const radius = opts.radius ?? 58;
-    const color = opts.color ?? 0xff7733;
-    const scale = opts.scale ?? 1.8;
-    const img = this.add.image(x, y, 'glow').setTint(color).setAlpha(0.55).setScale(scale).setDepth(100);
+    const texture = this.textures.exists('vfx_burning_ground') ? 'vfx_burning_ground' : 'glow';
+    const scale = texture === 'vfx_burning_ground'
+      ? (radius * 2.65) / 512
+      : (opts.scale ?? 1.8);
+    const img = this.add.image(x, y, texture)
+      .setAlpha(0)
+      .setScale(scale * 0.86)
+      .setAngle(Phaser.Math.Between(-18, 18))
+      .setDepth(100);
+    if (texture === 'glow') img.setTint(opts.color ?? 0xff7733);
+    this.tweens.add({
+      targets: img,
+      alpha: texture === 'vfx_burning_ground' ? 0.88 : 0.55,
+      scale: scale,
+      duration: 180,
+      ease: 'Cubic.Out',
+    });
+    this.tweens.add({
+      targets: img,
+      alpha: texture === 'vfx_burning_ground' ? 0.68 : 0.42,
+      scale: scale * 1.04,
+      delay: 180,
+      duration: 520,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut',
+    });
     this.burnZones.push({ x, y, dps, t: duration, img, tick: 0, radius, goldMult: opts.goldMult || 1, sourceBonus: opts.sourceBonus || 0 });
   }
 
   // ================= 特效工具 =================
   playFrostNovaFx(x, y, radius, strong = false) {
-    const fog = this.add.image(x, y, 'glow')
-      .setTint(0x9fe8ff)
-      .setAlpha(strong ? 0.32 : 0.24)
-      .setScale(radius / 34)
-      .setDepth(2054);
+    if (!this.textures.exists('vfx_frost_nova')) {
+      this.burst(x, y, 0xbfe8ff, strong ? 54 : 38, strong ? 1.45 : 1.1);
+      return;
+    }
+
+    const baseScale = (radius * (strong ? 2.85 : 2.55)) / 512;
+    const nova = this.add.image(x, y, 'vfx_frost_nova')
+      .setAlpha(0)
+      .setScale(baseScale * 0.28)
+      .setAngle(Phaser.Math.Between(-18, 18))
+      .setDepth(2092);
     this.tweens.add({
-      targets: fog,
-      scale: radius / 18,
+      targets: nova,
+      alpha: strong ? 0.98 : 0.9,
+      scale: baseScale,
+      duration: 170,
+      ease: 'Back.Out',
+      onComplete: () => {
+        this.tweens.add({
+          targets: nova,
+          alpha: 0,
+          scale: baseScale * 1.08,
+          duration: strong ? 540 : 440,
+          ease: 'Sine.Out',
+          onComplete: () => nova.destroy(),
+        });
+      },
+    });
+
+    const afterImage = this.add.image(x, y, 'vfx_frost_nova')
+      .setAlpha(strong ? 0.28 : 0.2)
+      .setScale(baseScale * 0.9)
+      .setAngle(nova.angle + 30)
+      .setDepth(2089);
+    this.tweens.add({
+      targets: afterImage,
       alpha: 0,
-      duration: 620,
+      scale: baseScale * 1.34,
+      duration: strong ? 760 : 620,
       ease: 'Cubic.Out',
-      onComplete: () => fog.destroy(),
+      onComplete: () => afterImage.destroy(),
     });
 
     const core = this.add.image(x, y, 'glow')
       .setTint(0xffffff)
-      .setAlpha(0.78)
-      .setScale(0.42)
-      .setDepth(2086);
+      .setAlpha(0.92)
+      .setScale(0.22)
+      .setDepth(2094);
     this.tweens.add({
       targets: core,
-      scale: strong ? 1.45 : 1.15,
+      scale: strong ? 1.8 : 1.38,
       alpha: 0,
-      duration: 240,
+      duration: 260,
       ease: 'Quad.Out',
       onComplete: () => core.destroy(),
     });
 
-    const ring = this.add.circle(x, y, radius, 0xbfe8ff, 0.07)
-      .setStrokeStyle(strong ? 6 : 5, 0xe8f6ff, 0.9)
-      .setScale(0.16)
-      .setDepth(2083);
-    this.tweens.add({
-      targets: ring,
-      scale: 1,
-      alpha: 0,
-      duration: 360,
-      ease: 'Cubic.Out',
-      onComplete: () => ring.destroy(),
-    });
-
-    const innerRing = this.add.circle(x, y, radius * 0.58, 0xffffff, 0)
-      .setStrokeStyle(3, 0x7edbff, 0.72)
-      .setScale(0.28)
-      .setDepth(2084);
-    this.tweens.add({
-      targets: innerRing,
-      scale: 1.18,
-      alpha: 0,
-      duration: 300,
-      ease: 'Cubic.Out',
-      onComplete: () => innerRing.destroy(),
-    });
-
-    const cracks = this.add.graphics().setDepth(2082);
-    cracks.lineStyle(strong ? 3 : 2, 0xe8f6ff, 0.74);
-    const crackCount = strong ? 10 : 7;
-    for (let i = 0; i < crackCount; i++) {
-      const a = (Math.PI * 2 * i / crackCount) + (Math.random() - 0.5) * 0.3;
-      const r1 = radius * Phaser.Math.Between(22, 36) / 100;
-      const r2 = radius * Phaser.Math.Between(72, 104) / 100;
-      cracks.lineBetween(
-        x + Math.cos(a) * r1,
-        y + Math.sin(a) * r1,
-        x + Math.cos(a) * r2,
-        y + Math.sin(a) * r2,
-      );
-    }
-    this.tweens.add({
-      targets: cracks,
-      alpha: 0,
-      duration: 420,
-      ease: 'Quad.Out',
-      onComplete: () => cracks.destroy(),
-    });
-
-    const shards = this.add.particles(x, y, 'spark', {
+    const shards = this.add.particles(x, y, 'ice_shard', {
       angle: { min: 0, max: 360 },
-      speed: { min: strong ? 180 : 130, max: strong ? 430 : 340 },
-      scale: { start: strong ? 1.28 : 1.0, end: 0 },
-      lifespan: strong ? 700 : 560,
-      tint: 0xbfe8ff,
+      rotate: { min: 0, max: 360 },
+      speed: { min: strong ? 110 : 75, max: strong ? 250 : 190 },
+      scale: { start: strong ? 0.58 : 0.44, end: 0 },
+      lifespan: strong ? 620 : 500,
       emitting: false,
-    }).setDepth(2090);
-    shards.explode(strong ? 54 : 38);
-    this.time.delayedCall(strong ? 880 : 720, () => shards.destroy());
+    }).setDepth(2095);
+    shards.explode(strong ? 18 : 12);
+    this.time.delayedCall(strong ? 760 : 620, () => shards.destroy());
 
-    this.cameras.main.shake(strong ? 170 : 110, strong ? 0.004 : 0.0025);
+    this.cameras.main.shake(strong ? 210 : 140, strong ? 0.005 : 0.0032);
   }
 
   playPlagueBurstFx(x, y, radius, targets = []) {
@@ -2649,6 +2695,19 @@ export class GameScene extends Phaser.Scene {
     this.dying = true;
     if (this.prepTimer) this.prepTimer.remove();
     if (this.spawnEvent) this.spawnEvent.remove();
+
+    // 败北是终态模态：先收起所有造塔/进化交互，避免卡片与败北弹窗叠层。
+    this.clearTowerChoiceLayer();
+    this.clearPendingTowerDraft();
+    if (this.evolutionChoiceOpen) {
+      this.resumeEvolutionChoice();
+      this.evolutionChoiceOpen = false;
+      if (this.evolutionLayer) {
+        this.evolutionLayer.destroy();
+        this.evolutionLayer = null;
+      }
+    }
+
     this.cameras.main.shake(500, 0.015);
 
     if (!this.revived) {
@@ -2864,7 +2923,10 @@ export class GameScene extends Phaser.Scene {
           }
         }
       }
-      if (z.t <= 0) z.img.destroy();
+      if (z.t <= 0) {
+        this.tweens.killTweensOf(z.img);
+        z.img.destroy();
+      }
     }
     this.burnZones = this.burnZones.filter(z => z.t > 0);
 

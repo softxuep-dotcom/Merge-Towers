@@ -1,0 +1,315 @@
+{
+  "frames": {
+    "boss_front_1": {
+      "frame": {
+        "x": 2,
+        "y": 2,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_2": {
+      "frame": {
+        "x": 140,
+        "y": 2,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_3": {
+      "frame": {
+        "x": 278,
+        "y": 2,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_4": {
+      "frame": {
+        "x": 416,
+        "y": 2,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_5": {
+      "frame": {
+        "x": 554,
+        "y": 2,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_left_1": {
+      "frame": {
+        "x": 2,
+        "y": 140,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_left_2": {
+      "frame": {
+        "x": 140,
+        "y": 140,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_left_3": {
+      "frame": {
+        "x": 278,
+        "y": 140,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_left_4": {
+      "frame": {
+        "x": 416,
+        "y": 140,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_left_5": {
+      "frame": {
+        "x": 554,
+        "y": 140,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_left_1": {
+      "frame": {
+        "x": 2,
+        "y": 278,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_left_2": {
+      "frame": {
+        "x": 140,
+        "y": 278,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_left_3": {
+      "frame": {
+        "x": 278,
+        "y": 278,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_left_4": {
+      "frame": {
+        "x": 416,
+        "y": 278,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    },
+    "boss_front_left_5": {
+      "frame": {
+        "x": 554,
+        "y": 278,
+        "w": 136,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 136
+      }
+    }
+  },
+  "meta": {
+    "app": "Codex ChatGPT five-frame three-direction enemy sheet packer",
+    "version": "2.0",
+    "image": "enemy-boss-smooth-v2.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 692,
+      "h": 416
+    },
+    "scale": "1"
+  }
+}
