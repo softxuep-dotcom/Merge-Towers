@@ -23,7 +23,7 @@ const AVG_UNIT_DPS = (() => {   // 平均每个 Lv1 等效单位的 DPS（五元
   return es.reduce((s, e) => s + e.base * e.rate, 0) / es.length;
 })();
 const CONSOLIDATION = lv => dmgFactor(lv) / Math.pow(2, lv - 1); // 合成聚合加成：伤害系数/单位数（自动适配分段增长）
-const BRANCH_MULT = 1.25;       // Lv4+ 分支平均战力系数（含腐蚀/碎冰等组合的保守均值）
+const BRANCH_MULT = 1.25;       // Lv4+ 分支平均战力系数（含腐蚀/圣辉增伤与碎冰控制收益）
 const SURGE_BONUS = 0.08;       // 手动玩家的合成冲击等效 DPS 加成
 
 // ---------- 期望波构成（复刻 GameScene.composeWave 的权重，取期望值） ----------

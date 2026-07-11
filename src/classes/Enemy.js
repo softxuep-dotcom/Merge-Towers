@@ -1,4 +1,5 @@
 import { ENEMY_TYPES, ELITE, waveHp, BOSS_AFFIXES, BOSS_CONTROL } from '../config.js';
+import { t } from '../i18n.js';
 import {
   paintedEnemyAnimationSource,
   paintedEnemyAnimKey,
@@ -49,7 +50,7 @@ export class Enemy {
     this.typeKey = typeKey;
     this.type = ENEMY_TYPES[typeKey];
     this.path = path;
-    this.maxHp = waveHp(wave) * this.type.hpMult * (opts.hpMult || 1);
+    this.maxHp = waveHp(wave, opts.difficulty) * this.type.hpMult * (opts.hpMult || 1);
     this.hp = this.maxHp;
     this.progress = opts.progress || 0;
     this.dead = false;
@@ -79,12 +80,19 @@ export class Enemy {
     this.hardControlImmuneT = 0;
     this.corrodedT = 0;
     this.corrosionPct = 0;
-    this.poisons = []; // {dps, t, lv7, goldMult, plague, plagueRadius, sourceBonus}
+    this.poisons = []; // {dps, t, lv7, goldMult, plague, plagueRadius, sourceBonus, sourceTower}
     this.bobPhase = Math.random() * Math.PI * 2;
 
     const p = path.pointAt(this.progress);
     const spriteY = this.flying ? -30 : 0;
-    this.shadow = scene.add.image(0, 6, 'shadow').setScale((this.boss ? 1.8 : 0.8) * (this.elite ? 1.25 : 1));
+    this.shadow = scene.add.image(0, 6, 'shadow');
+    if (this.boss) {
+      // Boss 贴图较高，但脚下接触面并不宽。旧版等比放大到 1.8 倍后，
+      // 阴影会变成一块 86×36 的黑斑，并在侧身行走时明显拖在身体后方。
+      this.shadow.setScale(1.38, 0.68).setAlpha(0.56);
+    } else {
+      this.shadow.setScale(0.8 * (this.elite ? 1.25 : 1));
+    }
     this.paintedKey = paintedEnemyKey(typeKey);
     this.paintedAtlasKey = paintedEnemyTextureKey(scene, this.paintedKey);
     this.usesPaintedSprite = !!this.paintedAtlasKey && !!paintedEnemyAnimationSource(scene, this.paintedKey, 'left');
@@ -98,7 +106,9 @@ export class Enemy {
     } else {
       this.spr = scene.add.image(0, spriteY, 'enemy_' + typeKey);
     }
-    this.shadow.y = this.flying ? 8 : spriteY + Math.max(14, this.spr.displayHeight * 0.38);
+    this.shadow.y = this.flying
+      ? 8
+      : spriteY + Math.max(14, this.spr.displayHeight * (this.boss ? 0.47 : 0.38));
     const bw = this.boss ? 72 : 42;
     this.barBg = scene.add.rectangle(0, spriteY - this.type.size - 16, bw, 6, 0x000000, 0.55).setVisible(false);
     this.bar = scene.add.rectangle(0, spriteY - this.type.size - 16, bw, 6, 0x8bf05a).setVisible(false);
@@ -188,13 +198,22 @@ export class Enemy {
     const plague = poisonBranch === 'a';
     const plagueRadius = plague ? (sourceTower.lv >= 7 ? 190 : 95) : 0;
     if (poisonBranch === 'b') this.applyCorrosion(sourceTower.lv >= 7 ? 0.5 : 0.25, 5);
-    const stack = { dps, t: 5, lv7, goldMult, plague, plagueRadius, sourceBonus };
-    if (alive.length < maxStacks) {
+    const stack = { dps, t: 5, lv7, goldMult, plague, plagueRadius, sourceBonus, sourceTower };
+    const ownerOf = tower => {
+      while (tower?.dpsSuccessor) tower = tower.dpsSuccessor;
+      return tower || null;
+    };
+    const sourceOwner = ownerOf(sourceTower);
+    const ownStackIndexes = [];
+    alive.forEach((p, i) => {
+      if (ownerOf(p.sourceTower) === sourceOwner) ownStackIndexes.push(i);
+    });
+    if (ownStackIndexes.length < maxStacks) {
       alive.push(stack);
     } else {
-      // 刷新最快过期的一层
-      let idx = 0;
-      alive.forEach((p, i) => { if (p.t < alive[idx].t) idx = i; });
+      // 每座毒塔独立计算叠层上限，只刷新本塔最快过期的一层。
+      let idx = ownStackIndexes[0];
+      for (const i of ownStackIndexes) if (alive[i].t < alive[idx].t) idx = i;
       alive[idx] = {
         ...stack,
         dps: Math.max(alive[idx].dps, dps),
@@ -202,6 +221,7 @@ export class Enemy {
         plague: alive[idx].plague || plague,
         plagueRadius: Math.max(alive[idx].plagueRadius || 0, plagueRadius),
         sourceBonus: Math.max(alive[idx].sourceBonus || 0, sourceBonus),
+        sourceTower: sourceTower && dps >= alive[idx].dps ? sourceTower : alive[idx].sourceTower,
       };
     }
     this.poisons = alive;
@@ -216,12 +236,14 @@ export class Enemy {
       this.barBg.setVisible(true); this.bar.setVisible(true);
       this.spr.setTint(0x9fe8ff).setTintMode(Phaser.TintModes.FILL);
       this.scene.time.delayedCall(70, () => { if (!this.dead) this.restoreTint(); });
-      if (this.scene.showDmg) this.scene.showDmg(this.x, this.y - 50, '护盾', '#9fe8ff');
+      if (this.scene.showDmg) this.scene.showDmg(this.x, this.y - 50, t('game.shield'), '#9fe8ff');
       return 0;
     }
     const amp = 1 + Math.min(1, Math.max(0, (this.corrodedT > 0 ? this.corrosionPct : 0) + (sourceBonus || 0)));
     const real = (trueDmg ? dmg : dmg * (1 - this.armor)) * amp;
+    const applied = Math.min(this.hp, real);
     this.hp -= real;
+    if (this.scene.recordTowerDamage) this.scene.recordTowerDamage(sourceTower, applied);
     this.barBg.setVisible(true); this.bar.setVisible(true);
     this.bar.width = Math.max(0, (this.boss ? 72 : 42) * (this.hp / this.maxHp));
     // 受击闪白（Phaser 4：setTintFill 已移除，改用 TintModes.FILL）
@@ -274,11 +296,14 @@ export class Enemy {
       this.killGoldMult = Math.max(this.killGoldMult || 1, p.goldMult || 1);
       if (this.eliteShield > 0) {
         this.eliteShield--;
-        if (this.scene.showDmg) this.scene.showDmg(this.x, this.y - 50, '护盾', '#9fe8ff');
+        if (this.scene.showDmg) this.scene.showDmg(this.x, this.y - 50, t('game.shield'), '#9fe8ff');
         continue;
       }
       const amp = 1 + Math.min(1, (this.corrodedT > 0 ? this.corrosionPct : 0) + (p.sourceBonus || 0));
-      this.hp -= p.dps * 0.25 * amp;
+      const real = p.dps * 0.25 * amp;
+      const applied = Math.min(this.hp, real);
+      this.hp -= real;
+      if (this.scene.recordTowerDamage) this.scene.recordTowerDamage(p.sourceTower, applied);
       this.barBg.setVisible(true); this.bar.setVisible(true);
       this.bar.width = Math.max(0, (this.boss ? 72 : 42) * (this.hp / this.maxHp));
       if (this.hp <= 0) { poisonDied = true; break; }
@@ -352,5 +377,15 @@ export class Enemy {
       this.spr.play(animKey);
     }
     this.spr.setFlipX(sourceDirection !== 'front' && paintedEnemyDirectionFlipX(direction));
+    // 侧身帧的双脚重心会随朝向偏离画布中心；阴影跟随脚底重心，避免产生
+    // “角色向前走、黑影拖在身后”的视觉错位。
+    if (this.boss) {
+      const footOffsetX = direction === 'right' ? 7
+        : direction === 'left' ? -7
+          : direction === 'front_right' ? 4
+            : direction === 'front_left' ? -4
+              : 0;
+      this.shadow.setPosition(footOffsetX, this.spr.displayHeight * 0.47);
+    }
   }
 }

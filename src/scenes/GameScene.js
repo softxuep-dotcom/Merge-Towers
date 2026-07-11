@@ -1,7 +1,9 @@
 import {
-  W, H, MAX_LV, ELEMENTS, ENEMY_TYPES, BASE_HP, LEAK_BOSS, LEAK_NORMAL,
+  W, H, MAX_LV, DEFAULT_DIFFICULTY, DIFFICULTIES, ELEMENTS, ENEMY_TYPES, BASE_HP, LEAK_BOSS, LEAK_NORMAL,
   PHASES, phaseFor, towerPrice, towerBasePrice, waveHp, waveCount, spawnFloor, DIAMOND,
-  MERGE_SURGE, SLOT_AFFIXES, ELITE, TOWER_BRANCHES, BOSS_AFFIXES,
+  towerDmg, towerRange,
+  MERGE_SURGE, FIRE_BRANCH_BALANCE, ICE_RIVER, ICE_SHATTER, LIGHTNING_HUB, PLAGUE,
+  ELITE, TOWER_BRANCHES, BOSS_AFFIXES,
   NON_BOSS_SPEED_CAP, nonBossSpeedMult,
 } from '../config.js';
 import { Enemy, Path } from '../classes/Enemy.js';
@@ -14,6 +16,9 @@ import {
 import { Poki } from '../poki.js';
 import { writeSave, tier, unlockedElements } from '../save.js';
 import { addTowerImage, fitTowerImageHeight } from '../textures.js';
+import { getLocale, setLocale, t, t as tr } from '../i18n.js';
+import { gameRunAnalysisMethods } from './gameRunAnalysis.js';
+import { gameVfxMethods } from './gameVfx.js';
 
 // 地面路径（行进式像素描迹校准到石板路中轴线，2026-07-09）
 const PATH_PTS = [
@@ -35,14 +40,21 @@ const FLY_PTS = [{ x: 60, y: -30 }, { x: 480, y: 1015 }];
 const SLOT_XS = [159, 260, 362, 464, 565];
 const SLOT_YS = [458, 584];
 const TYPE_ICON = { slime: '🟣', runner: '💨', tank: '🛡️', flyer: '🐝', splitter: '🟠', boss: '💀', mini: '·' };
-const TYPE_CN = { slime: '小兵', runner: '疾行者', tank: '铁盾兵', flyer: '飞行兵', splitter: '分裂怪', boss: 'Boss', mini: '小怪' };
+const TYPE_CN = { slime: t('enemy.slime'), runner: t('enemy.runner'), tank: t('enemy.tank'), flyer: t('enemy.flyer'), splitter: t('enemy.splitter'), boss: t('enemy.boss'), mini: t('enemy.mini') };
 const ELITE_ICON = { shield: '🛡', haste: '🌀', split: '✹' };
 const BOSS_AFFIX_KEYS = ['resilient', 'armored', 'twin', 'rage'];
 const LANDSCAPE_SIDEBAR_MIN = 360;
 const LANDSCAPE_SIDEBAR_MAX = 430;
+const BONUS_TOWER_LIMIT = 1;
 
 export class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
+
+  init(data = {}) {
+    const requested = data.difficulty || this.registry.get('difficulty') || DEFAULT_DIFFICULTY;
+    this.difficulty = DIFFICULTIES[requested] ? requested : DEFAULT_DIFFICULTY;
+    this.registry.set('difficulty', this.difficulty);
+  }
 
   create() {
     const S = this.S = this.registry.get('save');
@@ -91,13 +103,29 @@ export class GameScene extends Phaser.Scene {
     this.spawnLeft = 0;
     this.dying = false;
     this.over = false;
+    this.isPaused = false;
+    this.pauseLayer = null;
+    this.settingsOpen = false;
+    this.settingsLayer = null;
+    this.settingsPrevTimeScale = null;
+    this.settingsPrevTweenScale = null;
     this.enemies = [];
     this.towers = [];
+    this.nextTowerId = 1;
     this.burnZones = [];
+    this.waveCombatTime = 0;
+    this.waveTowerDamage = new Map();
     this.leakStats = {};
     this.dmgCount = 0;
     this.coinCount = 0;
     this.lastKillSfx = 0;
+    this.firstRunTutorial = (S.tutorialVersion || 0) < 1;
+    this.tutorialStep = this.firstRunTutorial ? 'build' : null;
+    this.tutorialElem = 'fire';
+    this.tutorialTowerA = null;
+    this.tutorialTowerB = null;
+    this.tutorialText = null;
+    this.tutorialHighlight = null;
     this.installAudioLifecycle();
 
     this.path = new Path(PATH_PTS);
@@ -118,7 +146,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     Poki.gameplayStart();
-    this.startPrep();
+    if (this.firstRunTutorial) this.startFirstRunTutorial();
+    else this.startPrep();
   }
 
   // ================= 场景搭建 =================
@@ -162,8 +191,6 @@ export class GameScene extends Phaser.Scene {
       this.slots.push({ x, y, tower: null, ring });
       this.slotRings.push(ring);
     }
-    this.assignSlotAffixes();
-
     // 红色警示边缘（漏怪反馈）
     this.vignette = this.add.rectangle(W / 2, H / 2, W, H, 0xff2222, 0).setDepth(2900);
     // 白闪（最高级合成）
@@ -177,41 +204,20 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  assignSlotAffixes() {
-    const keys = Object.keys(SLOT_AFFIXES);
-    const count = Phaser.Math.Between(2, 3);
-    const picked = Phaser.Utils.Array.Shuffle(this.slots.slice()).slice(0, count);
-    picked.forEach((slot, i) => {
-      const affix = SLOT_AFFIXES[keys[i % keys.length]];
-      slot.affix = affix;
-
-      const glow = this.add.image(slot.x, slot.y + 2, 'glow')
-        .setTint(affix.color)
-        .setAlpha(0.42)
-        .setScale(1.22)
-        .setDepth(-8);
-      const icon = this.uiText(slot.x + 30, slot.y - 18, affix.icon, 20, this.hexColor(affix.color))
-        .setOrigin(0.5)
-        .setDepth(-7);
-      icon.setStroke('#1a1d2e', 4);
-      const pulse = this.add.circle(slot.x, slot.y, 40, affix.color, 0)
-        .setStrokeStyle(2, affix.color, 0.34)
-        .setDepth(-7);
-      this.tweens.add({ targets: glow, alpha: 0.22, scale: 1.4, duration: 1300, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
-      this.tweens.add({ targets: pulse, scale: 1.12, alpha: 0.26, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
-      slot.affixFx = [glow, icon, pulse];
-    });
-  }
-
   buildUI() {
     this.layoutBg = this.add.rectangle(W / 2, H / 2, W, H, 0x12131f, 1).setDepth(-40);
     this.sidebarBg = this.add.rectangle(W / 2, H / 2, 1, 1, 0x161825, 0.94).setDepth(995).setVisible(false);
     this.sidebarDivider = this.add.rectangle(W / 2, H / 2, 2, H, 0x2d3348, 1).setDepth(996).setVisible(false);
 
     // 顶部状态栏
-    this.topBar = this.add.rectangle(W / 2, 30, W, 60, 0x161825, 0.9).setDepth(1000);
-    this.waveText = this.uiText(20, 30, '', 26, '#ffffff').setOrigin(0, 0.5);
-    this.heartText = this.uiText(180, 30, '', 24, '#ff7a7a').setOrigin(0, 0.5);
+    this.topBar = this.add.rectangle(W / 2, 36, W, 72, 0x0b1421, 0.88).setDepth(1000);
+    this.topAccent = this.add.rectangle(W / 2, 71, W, 2, 0x65c9a5, 0.42).setDepth(1001);
+    this.topSep1 = this.add.rectangle(222, 36, 1, 38, 0x9bb2c8, 0.18).setDepth(1001);
+    this.topSep2 = this.add.rectangle(320, 36, 1, 38, 0x9bb2c8, 0.18).setDepth(1001);
+    this.topSep3 = this.add.rectangle(494, 36, 1, 38, 0x9bb2c8, 0.18).setDepth(1001);
+    this.topSep4 = this.add.rectangle(603, 36, 1, 38, 0x9bb2c8, 0.18).setDepth(1001);
+    this.waveText = this.uiText(16, 30, '', 23, '#ffffff').setOrigin(0, 0.5);
+    this.heartText = this.uiText(248, 30, '', 22, '#ff7a7a').setOrigin(0, 0.5);
     this.coinIcon = this.add.image(332, 30, 'coin').setDepth(1001).setScale(1.2);
     this.goldText = this.uiText(350, 30, '0', 26, '#ffd34e').setOrigin(0, 0.5);
     this.diamondIcon = this.add.image(516, 30, 'diamond').setDepth(1001).setScale(0.9);
@@ -225,43 +231,52 @@ export class GameScene extends Phaser.Scene {
         this.muteBtn.setText(isMuted() ? '🔇' : '🔊');
         if (!isMuted()) startStageAudio(phaseFor(this.wave));
       });
+    this.pauseBtn = this.uiText(642, 30, 'Ⅱ', 28, '#ffffff').setOrigin(0.5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.openPause());
+    this.settingsBtn = this.uiText(598, 30, '⚙', 25, '#dce8f2').setOrigin(0.5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.openSettings());
 
     // Boss 血条
     this.bossBarBg = this.add.rectangle(W / 2, 74, 604, 14, 0x000000, 0.6).setDepth(1000).setVisible(false);
     this.bossBar = this.add.rectangle(W / 2 - 300, 74, 600, 10, 0xe84a5f).setOrigin(0, 0.5).setDepth(1001).setVisible(false);
 
     // 下一波预告
-    this.previewText = this.uiText(W / 2, 110, '', 24, '#c9d2f0').setOrigin(0.5);
+    this.previewBg = this.add.rectangle(W / 2, 108, 330, 44, 0x0b1421, 0.66).setStrokeStyle(1, 0x7892aa, 0.18).setDepth(999);
+    this.previewText = this.uiText(W / 2, 108, '', 21, '#d7e2ed').setOrigin(0.5);
 
     // 底部面板（背景图模式半透明，露出城堡）
-    this.bottomPanel = this.add.rectangle(W / 2, 1130, W, 300, 0x161825, this.hasBg ? 0.82 : 0.95).setDepth(1000);
+    this.bottomPanel = this.add.rectangle(W / 2, 1155, W, 250, 0x0b1421, this.hasBg ? 0.82 : 0.94).setDepth(1000);
+    this.bottomAccent = this.add.rectangle(W / 2, 1031, W, 2, 0x65c9a5, 0.35).setDepth(1001);
 
     // 提前召唤
-    this.callBtn = makeButton(this, W / 2, 1012, 340, 58, '⚔ 提前召唤 +10%金币', {
-      bg: 0x6b5a2e, stroke: 0xd8b74f, fontSize: 24,
+    this.callBtn = makeButton(this, W / 2, 1012, 370, 52, t('game.call'), {
+      bg: 0x594b2b, stroke: 0xb89a50, fontSize: 20,
       onClick: () => this.startWave(true),
     }).setDepth(1002).setVisible(false);
 
     // 买塔（核心按钮）
-    this.buyBtn = makeButton(this, 360, 1155, 290, 130, '', {
-      bg: 0x2e6b4f, stroke: 0x59c98f, fontSize: 30,
+    this.buyBtn = makeButton(this, 350, 1170, 326, 112, '', {
+      bg: 0x24624f, stroke: 0x58bd91, fontSize: 29,
       onClick: () => this.buyTower(),
     }).setDepth(1002);
 
     // 回收区
-    this.sellRect = new Phaser.Geom.Rectangle(30, 1090, 160, 130);
-    this.sellZone = this.add.rectangle(110, 1155, 160, 130, 0x5a2e35, 1).setStrokeStyle(2, 0x9c4a58).setDepth(1001);
-    this.sellText = this.uiText(110, 1155, '♻\n回收 50%', 22, '#ff9aa8').setOrigin(0.5).setDepth(1002);
+    this.sellRect = new Phaser.Geom.Rectangle(18, 1114, 142, 112);
+    this.sellZone = this.add.rectangle(89, 1170, 142, 112, 0x3e2932, 0.92).setStrokeStyle(2, 0x81505d).setDepth(1001);
+    this.sellText = this.uiText(89, 1170, t('game.sell'), 20, '#e99aa8').setOrigin(0.5).setDepth(1002);
+    this.sellZone.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+      toast(this, W / 2, this.sellZone.y - 90, t('game.sellHint'), '#ffd7df', 18);
+    });
 
     // 广告送塔
-    this.giftBtn = makeButton(this, 610, 1105, 180, 70, '', {
-      bg: 0x6b4a86, stroke: 0xb07fe0, fontSize: 20,
+    this.giftBtn = makeButton(this, 625, 1138, 158, 52, '', {
+      bg: 0x4b365d, stroke: 0x8868a2, fontSize: 16,
       onClick: () => this.adGiftTower(),
     }).setDepth(1002);
 
     // 2 倍速（局外解锁后显示）
-    this.speedBtn = makeButton(this, 610, 1195, 180, 70, '', {
-      bg: 0x3b4568, fontSize: 24,
+    this.speedBtn = makeButton(this, 625, 1202, 158, 52, '', {
+      bg: 0x2d3a55, stroke: 0x53698f, fontSize: 20,
       onClick: () => this.toggleSpeed(),
     }).setDepth(1002);
     this.updateSpeedButton();
@@ -330,37 +345,48 @@ export class GameScene extends Phaser.Scene {
 
   applyPortraitUI() {
     const bottom = this.layout.viewH;
-    const panelY = bottom - 150;
-    const callY = bottom - 268;
-    const actionY = bottom - 125;
+    const panelY = bottom - 125;
+    const callY = bottom - 270;
+    const actionY = bottom - 110;
 
     this.sidebarBg.setVisible(false);
     this.sidebarDivider.setVisible(false);
     this.bottomPanel.setVisible(true);
+    this.bottomAccent.setVisible(true);
+    for (const sep of [this.topSep1, this.topSep2, this.topSep3, this.topSep4]) sep.setVisible(true);
 
-    this.setUiRect(this.topBar, W / 2, 30, W, 60);
-    this.setUi(this.waveText, 20, 30).setOrigin(0, 0.5);
-    this.setUi(this.heartText, 180, 30).setOrigin(0, 0.5);
+    this.setUiRect(this.topBar, W / 2, 36, W, 72);
+    this.setUiRect(this.topAccent, W / 2, 71, W, 2);
+    this.setUiRect(this.topSep1, 222, 36, 1, 38);
+    this.setUiRect(this.topSep2, 320, 36, 1, 38);
+    this.setUiRect(this.topSep3, 494, 36, 1, 38);
+    this.setUiRect(this.topSep4, 603, 36, 1, 38);
+    this.setUi(this.waveText, 16, 30).setOrigin(0, 0.5);
+    this.setUi(this.heartText, 248, 30).setOrigin(0, 0.5);
     this.setUi(this.coinIcon, 332, 30).setScale(1.2);
     this.setUi(this.goldText, 350, 30).setOrigin(0, 0.5);
     this.setUi(this.diamondIcon, 516, 30).setScale(0.9);
     this.setUi(this.diamondText, 534, 30).setOrigin(0, 0.5);
     this.setUi(this.muteBtn, 688, 30).setOrigin(0.5);
+    this.setUi(this.pauseBtn, 642, 30).setOrigin(0.5);
+    this.setUi(this.settingsBtn, 598, 30).setOrigin(0.5);
 
     this.bossBarMaxWidth = 600;
     this.setUiRect(this.bossBarBg, W / 2, 74, 604, 14);
     this.bossBar.setPosition(this.layout.x(W / 2 - 300), 74);
     this.bossBar.height = 10;
-    this.setUi(this.previewText, W / 2, 110).setOrigin(0.5);
+    this.setUiRect(this.previewBg, W / 2, 108, 330, 44);
+    this.setUi(this.previewText, W / 2, 108).setOrigin(0.5);
 
-    this.setUiRect(this.bottomPanel, W / 2, panelY, W, 300);
+    this.setUiRect(this.bottomPanel, W / 2, panelY, W, 250);
+    this.setUiRect(this.bottomAccent, W / 2, bottom - 249, W, 2);
     this.setUi(this.callBtn, W / 2, callY);
-    this.setUi(this.buyBtn, 360, actionY);
-    this.sellRect = new Phaser.Geom.Rectangle(30, bottom - 190, 160, 130);
-    this.setUiRect(this.sellZone, 110, actionY, 160, 130);
-    this.setUi(this.sellText, 110, actionY).setOrigin(0.5);
-    this.setUi(this.giftBtn, 610, bottom - 175);
-    this.setUi(this.speedBtn, 610, bottom - 85);
+    this.setUi(this.buyBtn, 350, actionY);
+    this.sellRect = new Phaser.Geom.Rectangle(18, bottom - 166, 142, 112);
+    this.setUiRect(this.sellZone, 89, actionY, 142, 112);
+    this.setUi(this.sellText, 89, actionY).setOrigin(0.5);
+    this.setUi(this.giftBtn, 625, bottom - 142);
+    this.setUi(this.speedBtn, 625, bottom - 78);
   }
 
   applyLandscapeUI() {
@@ -372,34 +398,43 @@ export class GameScene extends Phaser.Scene {
     this.sidebarBg.setVisible(true);
     this.sidebarDivider.setVisible(true);
     this.bottomPanel.setVisible(false);
+    this.bottomAccent.setVisible(false);
     this.setUiRect(this.sidebarBg, sideCenter, viewH / 2, sidebarW, viewH);
     this.setUiRect(this.sidebarDivider, fieldAreaW, viewH / 2, 2, viewH);
 
-    this.setUiRect(this.topBar, sideCenter, 76, sidebarW - 34, 120);
+    this.setUiRect(this.topBar, sideCenter, 70, sidebarW - 34, 120);
+    this.setUiRect(this.topAccent, sideCenter, 130, sidebarW - 34, 2);
     this.setUi(this.waveText, sideLeft + 12, 42).setOrigin(0, 0.5);
-    this.setUi(this.heartText, sideLeft + 150, 42).setOrigin(0, 0.5);
-    this.setUi(this.coinIcon, sideLeft + 22, 93).setScale(1.1);
-    this.setUi(this.goldText, sideLeft + 46, 93).setOrigin(0, 0.5);
-    this.setUi(this.diamondIcon, sideLeft + 178, 93).setScale(0.82);
-    this.setUi(this.diamondText, sideLeft + 200, 93).setOrigin(0, 0.5);
+    this.setUi(this.heartText, sideLeft + 12, 96).setOrigin(0, 0.5);
+    this.setUi(this.coinIcon, sideLeft + 110, 96).setScale(1.05);
+    this.setUi(this.goldText, sideLeft + 134, 96).setOrigin(0, 0.5);
+    this.setUi(this.diamondIcon, sideLeft + 236, 96).setScale(0.8);
+    this.setUi(this.diamondText, sideLeft + 257, 96).setOrigin(0, 0.5);
     this.setUi(this.muteBtn, sideRight - 20, 42).setOrigin(0.5);
+    this.setUi(this.pauseBtn, sideRight - 68, 42).setOrigin(0.5);
+    this.setUi(this.settingsBtn, sideRight - 116, 42).setOrigin(0.5);
+    this.setUiRect(this.topSep1, sideLeft + 94, 96, 1, 28);
+    this.setUiRect(this.topSep2, sideLeft + 220, 96, 1, 28);
+    this.topSep3.setVisible(false);
+    this.topSep4.setVisible(false);
 
     this.bossBarMaxWidth = sidebarW - 74;
     this.setUiRect(this.bossBarBg, sideCenter, 146, this.bossBarMaxWidth + 4, 14);
     this.bossBar.setPosition(this.layout.x(sideCenter - this.bossBarMaxWidth / 2), 146);
     this.bossBar.height = 10;
+    this.setUiRect(this.previewBg, sideCenter, 178, sidebarW - 50, 42);
     this.setUi(this.previewText, sideCenter, 178).setOrigin(0.5);
 
     this.setUi(this.callBtn, sideCenter, 238);
-    this.setUi(this.buyBtn, sideCenter, 352);
+    this.setUi(this.buyBtn, sideCenter, 338);
 
-    const sellX = sideLeft + 82;
-    const sellY = 514;
-    this.sellRect = new Phaser.Geom.Rectangle(this.layout.x(sellX - 80), sellY - 65, 160, 130);
-    this.setUiRect(this.sellZone, sellX, sellY, 160, 130);
+    const sellX = sideCenter;
+    const sellY = 458;
+    this.sellRect = new Phaser.Geom.Rectangle(this.layout.x(sellX - 71), sellY - 56, 142, 112);
+    this.setUiRect(this.sellZone, sellX, sellY, 142, 112);
     this.setUi(this.sellText, sellX, sellY).setOrigin(0.5);
-    this.setUi(this.giftBtn, sideRight - 90, 490);
-    this.setUi(this.speedBtn, sideRight - 90, 584);
+    this.setUi(this.giftBtn, sideCenter, 548);
+    this.setUi(this.speedBtn, sideCenter, 614);
   }
 
   uiText(x, y, str, size = 24, color = '#ffffff') {
@@ -424,7 +459,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   updateUI() {
-    this.waveText.setText(`第 ${this.wave} 波`);
+    this.waveText.setText(t('game.wave', { wave: this.wave, difficulty: DIFFICULTIES[this.difficulty].cn }));
     this.heartText.setText(`❤ ${Math.max(0, this.baseHp)}`);
     if (this.goldRollTween && this.gold < this.displayGold) {
       this.goldRollTween.stop();
@@ -434,30 +469,103 @@ export class GameScene extends Phaser.Scene {
     this.goldText.setText(String(Math.floor(this.displayGold)));
     this.diamondText.setText(String(this.S.diamonds + this.diamondsRun));
     const cost = towerPrice(this.wave, this.waveBought);
-    if (this.pendingTowerDraft) this.buyBtn.label.setText('点空位\n放 塔');
-    else if (this.towerChoiceLayer) this.buyBtn.label.setText('选元素\n...');
-    else this.buyBtn.label.setText(`造 塔\n💰 ${cost}`);
+    if (this.pendingTowerDraft) this.buyBtn.label.setText(t('game.place'));
+    else if (this.towerChoiceLayer) this.buyBtn.label.setText(t('game.choose'));
+    else this.buyBtn.label.setText(t('game.build', { cost }));
     const afford = !this.pendingTowerDraft && !this.towerChoiceLayer && this.gold >= cost && this.slots.some(s => !s.tower);
     this.buyBtn.bg.setFillStyle(afford ? 0x2e6b4f : 0x33384a);
-    const giftLeft = 2 - this.adGifts;
-    this.giftBtn.label.setText(giftLeft > 0 ? `📺 送高级塔\n(剩${giftLeft}次)` : '📺 已用完');
+    const giftLeft = BONUS_TOWER_LIMIT - this.adGifts;
+    this.giftBtn.label.setText(giftLeft > 0 ? t('game.gift', { left: giftLeft }) : t('game.giftDone'));
     this.giftBtn.setEnabled(giftLeft > 0);
+    if (this.firstRunTutorial) {
+      this.giftBtn.setEnabled(false);
+      this.speedBtn.setEnabled(false);
+    }
   }
 
   // ================= 开局预置 =================
   presetTowers() {
+    if (this.firstRunTutorial) {
+      const slot = this.slots[6];
+      this.tutorialTowerA = new Tower(this, slot, this.tutorialElem, 1);
+      slot.tower = this.tutorialTowerA;
+      this.towers.push(this.tutorialTowerA);
+      return;
+    }
     const elems = unlockedElements(this.S, this.wave);
     const elem = Phaser.Utils.Array.GetRandom(elems);
     const a = this.slots[6], b = this.slots[7]; // 下排相邻两格
     a.tower = new Tower(this, a, elem, 1);
     b.tower = new Tower(this, b, elem, 1);
     this.towers.push(a.tower, b.tower);
-    if (this.S.runs === 0) {
-      // 首局手势引导：拖到一起
-      this.hint = this.uiText(W / 2, 545, '👆 拖动合成同色塔！', 30, '#ffe97a').setOrigin(0.5).setDepth(2000);
-      this.hintHand = this.uiText(a.x, a.y - 30, '👆', 40).setOrigin(0.5).setDepth(2001);
-      this.tweens.add({ targets: this.hintHand, x: b.x, y: b.y - 30, duration: 900, repeat: -1, hold: 300, repeatDelay: 300 });
+  }
+
+  startFirstRunTutorial() {
+    this.waveState = 'tutorial';
+    this.setTutorialInstruction('game.tutorialBuild', 970);
+    this.clearTutorialHighlight();
+    this.tutorialHighlight = this.add.rectangle(this.buyBtn.x, this.buyBtn.y, 352, 132, 0x65e6ae, 0.035)
+      .setStrokeStyle(5, 0x74efb8, 0.95)
+      .setDepth(2390);
+    this.tweens.add({ targets: this.tutorialHighlight, scale: 1.06, alpha: 0.42, duration: 620, yoyo: true, repeat: -1 });
+    this.buyBtn.setEnabled(true);
+    this.giftBtn.setEnabled(false);
+    this.speedBtn.setEnabled(false);
+  }
+
+  setTutorialInstruction(key, y = 970) {
+    const x = this.layout?.landscape ? this.layout.x(this.layout.fieldCenterScreen) : W / 2;
+    if (!this.tutorialBanner) {
+      this.tutorialBanner = this.add.rectangle(x, y, 570, 58, 0x091522, 0.9)
+        .setStrokeStyle(2, 0x6dd6ac, 0.7).setDepth(2380);
+      this.tutorialText = this.uiText(x, y, '', 24, '#eaf8f2').setOrigin(0.5).setDepth(2381);
     }
+    this.tutorialBanner.setPosition(x, y);
+    this.tutorialText.setPosition(x, y).setText(t(key));
+  }
+
+  clearTutorialHighlight() {
+    if (!this.tutorialHighlight) return;
+    this.tweens.killTweensOf(this.tutorialHighlight);
+    this.tutorialHighlight.destroy();
+    this.tutorialHighlight = null;
+  }
+
+  startMergeTutorial(a, b) {
+    this.tutorialStep = 'merge';
+    this.tutorialTowerA = a;
+    this.tutorialTowerB = b;
+    a.setHighlight(true);
+    b.setHighlight(true);
+    this.setTutorialInstruction('game.tutorialMerge', 390);
+    if (this.tutorialHand) this.tutorialHand.destroy();
+    this.tutorialHand = this.uiText(a.slot.x, a.slot.y - 92, '👆', 42).setOrigin(0.5).setDepth(2395);
+    this.tweens.add({
+      targets: this.tutorialHand,
+      x: b.slot.x,
+      y: b.slot.y - 92,
+      duration: 900,
+      hold: 260,
+      repeatDelay: 260,
+      repeat: -1,
+      ease: 'Sine.InOut',
+    });
+  }
+
+  completeFirstRunTutorial(mergedTower) {
+    this.firstRunTutorial = false;
+    this.tutorialStep = null;
+    this.S.tutorialDone = true;
+    this.S.tutorialVersion = 1;
+    writeSave(this.S);
+    mergedTower.setHighlight(false);
+    this.clearTutorialHighlight();
+    if (this.tutorialHand) { this.tweens.killTweensOf(this.tutorialHand); this.tutorialHand.destroy(); this.tutorialHand = null; }
+    if (this.tutorialBanner) { this.tutorialBanner.destroy(); this.tutorialBanner = null; }
+    if (this.tutorialText) { this.tutorialText.destroy(); this.tutorialText = null; }
+    toast(this, W / 2, 390, t('game.tutorialReady'), '#8ff0b6', 25);
+    this.updateUI();
+    this.startPrep();
   }
 
   clearHint() {
@@ -551,7 +659,8 @@ export class GameScene extends Phaser.Scene {
     this.pending = this.composeWave(this.wave);
     // 预告图标（去重）
     const icons = this.previewIcons(this.pending);
-    this.previewText.setText(`下一波 ▶ ${icons}`);
+    this.previewText.setText(t('game.next', { icons }));
+    this.previewBg.setVisible(true);
     this.callBtn.setVisible(true);
     this.prepTimer = this.time.delayedCall(4000, () => this.startWave(false));
     this.updateUI();
@@ -568,9 +677,11 @@ export class GameScene extends Phaser.Scene {
     this.holyHealThisWave = 0;
     this.callBtn.setVisible(false);
     this.previewText.setText('');
+    this.previewBg.setVisible(false);
     this.waveState = 'active';
+    this.beginWaveDps();
     Sfx.wave();
-    this.banner(`Wave ${this.wave}`);
+    this.banner(t('game.waveOnly', { value: this.wave }));
     if (this.wave % 5 === 0) { Sfx.bossIn(); this.cameras.main.shake(350, 0.006); }
 
     const queue = this.pending.slice();
@@ -614,7 +725,7 @@ export class GameScene extends Phaser.Scene {
   spawnEnemy(typeKey, opts = {}) {
     const t = ENEMY_TYPES[typeKey];
     const path = t.flying ? this.flyPath : this.path;
-    const spawnOpts = { ...opts };
+    const spawnOpts = { ...opts, difficulty: this.difficulty };
     if (!t.boss) {
       spawnOpts.speedMult = (spawnOpts.speedMult || 1) * nonBossSpeedMult(this.wave);
       spawnOpts.speedCap = NON_BOSS_SPEED_CAP;
@@ -654,18 +765,22 @@ export class GameScene extends Phaser.Scene {
     const it = tier(this.S, 'interest');
     if (it > 0) {
       const gain = Math.min(Math.floor(this.gold * 0.05 * it), 50 * it);
-      if (gain > 0) { this.gold += gain; toast(this, 380, 200, `利息 +${gain}💰`, '#ffd34e', 24); }
+      if (gain > 0) { this.gold += gain; toast(this, 380, 200, t('game.interest', { value: gain }), '#ffd34e', 24); }
     }
     const finished = this.wave;
     this.wave++;
-    if (this.wave === 8) {
-      this.banner('☠ 毒塔入池');
-      toast(this, W / 2, 245, '新选择：毒塔克制铁盾', '#7ede55', 28);
+    if (this.wave === 6) {
+      this.banner(t('game.venomUnlock'));
+      toast(this, W / 2, 245, t('game.venomTip'), '#7ede55', 28);
+    }
+    if (this.wave === 11) {
+      this.banner(t('game.lightUnlock'));
+      toast(this, W / 2, 245, t('game.lightTip'), '#fff3c4', 28);
     }
     // 里程碑钻石
     if (finished % 10 === 0) {
       this.diamondsRun += DIAMOND.milestone;
-      toast(this, W / 2, 300, `里程碑! +${DIAMOND.milestone}💎`, '#9fe8ff', 32);
+      toast(this, W / 2, 300, t('game.reward', { value: DIAMOND.milestone }), '#9fe8ff', 32);
       Sfx.diamond();
     }
     // 阶段色调切换（GDD §2）
@@ -673,10 +788,10 @@ export class GameScene extends Phaser.Scene {
     if (oldPh !== newPh) {
       setAudioPhase(newPh, { accent: true });
       this.playPhaseShiftFx(newPh);
-      this.banner(`${newPh.name}降临`);
+      this.banner(t('game.phase', { name: newPh.name }));
       const speedMult = nonBossSpeedMult(this.wave);
       if (speedMult > 1) {
-        toast(this, W / 2, 250, `小兵速度 +${Math.round((speedMult - 1) * 100)}%`, '#ffe97a', 28);
+        toast(this, W / 2, 250, t('game.minionSpeed', { value: Math.round((speedMult - 1) * 100) }), '#ffe97a', 28);
       }
       if (this.hasBg) {
         // 背景图模式：用叠色层做阶段氛围（白天透明，其余 0.22）
@@ -752,7 +867,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (e.elite) {
       this.diamondsRun += DIAMOND.elite;
-      toast(this, e.x, e.y - 78, `精英 +${DIAMOND.elite}💎`, '#9fe8ff', 28);
+      toast(this, e.x, e.y - 78, t('game.elite', { value: DIAMOND.elite }), '#9fe8ff', 28);
       Sfx.diamond();
       this.burst(e.x, e.y, ELITE.affixes[e.eliteAffix].color, 24, 1.2);
     }
@@ -775,7 +890,10 @@ export class GameScene extends Phaser.Scene {
       for (const o of this.enemies) {
         if (!o.dead && Phaser.Math.Distance.Between(e.x, e.y, o.x, o.y) < radius) {
           infected.push({ x: o.x, y: o.y });
-          o.applyPoison(src.dps, 2, false);
+          o.applyPoison(src.dps, 2, false, src.sourceTower, {
+            branchEffects: false,
+            sourceBonus: src.sourceBonus || 0,
+          });
           o.killGoldMult = Math.max(o.killGoldMult || 1, src.goldMult || 1);
         }
       }
@@ -795,12 +913,12 @@ export class GameScene extends Phaser.Scene {
     if (!target) return;
     const healed = target.heal(target.maxHp * deadBoss.twinHealPct);
     if (healed <= 0) return;
-    toast(this, target.x, target.y - 78, `双生 +${Math.round(healed)}`, '#ffb199', 26);
+    toast(this, target.x, target.y - 78, t('game.twin', { value: Math.round(healed) }), '#ffb199', 26);
     this.burst(target.x, target.y, 0xe84a5f, 18, 1);
   }
 
   onBossRage(e) {
-    toast(this, e.x, e.y - 84, '狂怒!', '#ff9b45', 30);
+    toast(this, e.x, e.y - 84, t('game.rage'), '#ff9b45', 30);
     this.burst(e.x, e.y, 0xff9b45, 24, 1.25);
     this.cameras.main.shake(180, 0.005);
   }
@@ -892,12 +1010,20 @@ export class GameScene extends Phaser.Scene {
   buyTower(silent) {
     if (silent) return this.buyTowerSilently();
     if (this.evolutionChoiceOpen || this.towerChoiceLayer || this.pendingTowerDraft) return false;
+    if (this.firstRunTutorial && this.tutorialStep !== 'build') return false;
     const cost = towerPrice(this.wave, this.waveBought);
-    if (this.gold < cost) { if (!silent) toast(this, this.buyBtn.x, this.buyBtn.y - 135, '金币不足', '#ff8888', 24); return false; }
+    if (this.gold < cost) { if (!silent) toast(this, this.buyBtn.x, this.buyBtn.y - 135, t('common.noGold'), '#ff8888', 24); return false; }
     const free = this.slots.filter(s => !s.tower);
-    if (!free.length) { if (!silent) toast(this, this.buyBtn.x, this.buyBtn.y - 135, '塔位已满，先合成!', '#ff8888', 24); return false; }
-    const lv = this.rollSpawnLv();
-    const choices = this.buildTowerChoices(lv);
+    if (!free.length) { if (!silent) toast(this, this.buyBtn.x, this.buyBtn.y - 135, t('game.full'), '#ff8888', 24); return false; }
+    const lv = this.firstRunTutorial ? 1 : this.rollSpawnLv();
+    const choices = this.firstRunTutorial
+      ? [{ elem: this.tutorialElem, branch: null }]
+      : this.buildTowerChoices(lv);
+    if (this.firstRunTutorial) {
+      this.tutorialStep = 'choose';
+      this.clearTutorialHighlight();
+      this.setTutorialInstruction('game.tutorialChoose', 760);
+    }
     this.showTowerChoices(lv, cost, choices);
     this.updateUI();
     return true;
@@ -950,20 +1076,23 @@ export class GameScene extends Phaser.Scene {
       .setInteractive();
     const panel = this.add.rectangle(centerX, panelY, panelW, panelH, 0x171b29, 0.94)
       .setStrokeStyle(2, 0x4a5578);
-    const title = this.uiText(centerX, titleY, `选择新塔（${choices.length}选1）  Lv${lv}  💰${cost}`, wide ? 22 : 24, '#ffe97a')
+    const title = this.uiText(centerX, titleY, t('game.pickTower', { count: choices.length, level: lv, cost }), wide ? 22 : 24, '#ffe97a')
       .setOrigin(0.5);
-    const cancel = makeButton(this, cancelX, cancelY, 82, 42, '取消', {
+    const cancel = makeButton(this, cancelX, cancelY, 82, 42, t('game.cancel'), {
       bg: 0x51586e,
       fontSize: 18,
       onClick: () => this.cancelTowerPurchase(),
     });
+    if (this.firstRunTutorial) cancel.setVisible(false);
     layer.add([blocker, panel, title, cancel]);
 
     const portraitPositions = expanded
       ? choices.map((_, i) => ({ x: W / 2, y: 845 + i * 72 }))
-      : (choices.length === 2
-          ? [{ x: 260, y: 1020 }, { x: 460, y: 1020 }]
-          : [{ x: 160, y: 1020 }, { x: 360, y: 1020 }, { x: 560, y: 1020 }]);
+      : (choices.length === 1
+          ? [{ x: W / 2, y: 1020 }]
+          : choices.length === 2
+            ? [{ x: 260, y: 1020 }, { x: 460, y: 1020 }]
+            : [{ x: 160, y: 1020 }, { x: 360, y: 1020 }, { x: 560, y: 1020 }]);
     choices.forEach((choice, i) => {
       const { elem, branch } = choice;
       const def = ELEMENTS[elem];
@@ -1003,12 +1132,18 @@ export class GameScene extends Phaser.Scene {
     this.ensureResponsiveLayout();
     if (lv >= 4 && !branch) branch = this.randomBranch(elem);
     this.pendingTowerDraft = { elem, lv, branch, cost };
+    if (this.firstRunTutorial) {
+      this.tutorialStep = 'place';
+      this.setTutorialInstruction('game.tutorialPlace', 390);
+    }
     const hintX = this.layout.landscape ? this.layout.x(this.layout.fieldCenterScreen) : W / 2;
     const hintY = this.layout.landscape ? Math.min(1120, this.layout.viewH - 150) : 905;
-    this.placementHint = this.uiText(hintX, hintY, `点一个空塔位放置 ${ELEMENTS[elem].cn} Lv${lv}`, 26, this.hexColor(ELEMENTS[elem].color))
-      .setOrigin(0.5)
-      .setDepth(2450);
-    this.placementHint.setStroke('#000000', 5);
+    if (!this.firstRunTutorial) {
+      this.placementHint = this.uiText(hintX, hintY, t('game.placeHint', { element: ELEMENTS[elem].cn, level: lv }), 26, this.hexColor(ELEMENTS[elem].color))
+        .setOrigin(0.5)
+        .setDepth(2450);
+      this.placementHint.setStroke('#000000', 5);
+    }
     this.showFreeSlots(true);
     this.updateUI();
   }
@@ -1048,17 +1183,20 @@ export class GameScene extends Phaser.Scene {
 
     const draft = this.pendingTowerDraft;
     if (this.gold < draft.cost) {
-      toast(this, this.buyBtn.x, this.buyBtn.y - 135, '金币不足', '#ff8888', 24);
+      toast(this, this.buyBtn.x, this.buyBtn.y - 135, t('common.noGold'), '#ff8888', 24);
       this.cancelTowerPurchase();
       return true;
     }
     this.gold -= draft.cost;
     this.bought++;
     this.waveBought++;
-    this.placeTower(nearest, draft.elem, draft.lv, draft.branch);
+    const placedTower = this.placeTower(nearest, draft.elem, draft.lv, draft.branch);
     Sfx.buy();
     this.clearPendingTowerDraft();
     this.clearHint();
+    if (this.firstRunTutorial && this.tutorialStep === 'place') {
+      this.startMergeTutorial(this.tutorialTowerA, placedTower);
+    }
     this.updateUI();
     return true;
   }
@@ -1075,6 +1213,7 @@ export class GameScene extends Phaser.Scene {
       t.c.setScale(opts.scale ?? 1);
     }
     if (lv > this.highestLv) this.highestLv = lv;
+    this.ensureWaveTowerStat(t);
     return t;
   }
 
@@ -1083,16 +1222,20 @@ export class GameScene extends Phaser.Scene {
     // b 的位置保留，产出 lv+1
     const slot = b.slot, elem = a.elem, lv = a.lv + 1;
     const branch = this.mergeBranchFor(a, b, lv, opts);
+    const completesTutorial = this.firstRunTutorial && this.tutorialStep === 'merge'
+      && ((a === this.tutorialTowerA && b === this.tutorialTowerB)
+        || (a === this.tutorialTowerB && b === this.tutorialTowerA));
     const pop = () => {
       a.destroy(); b.destroy();
-      const t = this.placeTower(slot, elem, lv, branch, { animate: false, scale: 0.22 });
-      t.c.setAlpha(0.85);
-      const resonance = this.registerMergeResonance(t, !!opts.auto);
-      this.playMergePop(t, resonance, !!opts.auto);
+      const mergedTower = this.placeTower(slot, elem, lv, branch, { animate: false, scale: 0.22 });
+      this.mergeWaveTowerStats(mergedTower, [a, b]);
+      mergedTower.c.setAlpha(0.85);
+      const resonance = this.registerMergeResonance(mergedTower, !!opts.auto);
+      this.playMergePop(mergedTower, resonance, !!opts.auto);
       this.clearHint();
       // 里程碑质变提示（GDD §3.3）
-      if (lv === 4 || lv === 7) toast(this, slot.x, slot.y - 90, '⭐ 里程碑质变!', '#ffe97a', 26);
-      if (lv === 4 && !opts.auto) this.showEvolutionChoice(t);
+      if (lv === 4 || lv === 7) toast(this, slot.x, slot.y - 90, tr('game.milestone'), '#ffe97a', 26);
+      if (lv === 4 && !opts.auto) this.showEvolutionChoice(mergedTower);
       // 本局最高级：慢镜 + 白闪（GDD §6.2）
       if (lv > this.highestLv || lv === this.highestLv) {
         if (lv >= this.highestLv && lv > 2) {
@@ -1105,6 +1248,7 @@ export class GameScene extends Phaser.Scene {
         this.highestLv = Math.max(this.highestLv, lv);
       }
       this.updateUI();
+      if (completesTutorial) this.completeFirstRunTutorial(mergedTower);
     };
 
     a.merging = true;
@@ -1127,6 +1271,8 @@ export class GameScene extends Phaser.Scene {
     this.tweens.killTweensOf([a.c, b.c, a.spr, b.spr]);
     a.c.setDepth(2700);
     b.c.setDepth(2701);
+
+    if (elem === 'ice') this.playIceMergeAbsorbFx(a, b, tx, ty);
 
     const pullGlow = this.add.image(tx, ty - 18, 'glow')
       .setTint(color)
@@ -1155,13 +1301,233 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  openPause() {
+    if (this.isPaused || this.over || this.dying) return;
+    this.isPaused = true;
+    this.time.timeScale = 0;
+    this.tweens.timeScale = 0;
+    this.ensureResponsiveLayout();
+    const cx = this.layout.x(this.layout.viewW / 2), cy = this.layout.viewH / 2;
+    const layer = this.add.container(0, 0).setDepth(7000);
+    this.pauseLayer = layer;
+    layer.add(this.add.rectangle(cx, cy, this.layout.viewW, this.layout.viewH, 0x070a12, 0.82).setInteractive());
+    layer.add(this.add.rectangle(cx, cy, 500, 470, 0x182238, 0.98).setStrokeStyle(3, 0x668cb2));
+    layer.add(this.add.text(cx, cy - 150, t('game.pauseTitle'), {
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '46px', color: '#fff0a6',
+    }).setOrigin(0.5));
+    layer.add(this.add.text(cx, cy - 92, t('game.pauseDesc'), {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '22px', color: '#aebfd5',
+    }).setOrigin(0.5));
+    layer.add(makeButton(this, cx, cy + 5, 360, 82, t('game.resume'), {
+      bg: 0x2e755b, stroke: 0x65d6a0, fontSize: 30, onClick: () => this.closePause(),
+    }));
+    layer.add(makeButton(this, cx, cy + 110, 360, 70, t('game.home'), {
+      bg: 0x35445e, stroke: 0x667b9b, fontSize: 25, onClick: () => {
+        this.time.timeScale = 1; this.tweens.timeScale = 1; this.scene.start('Menu');
+      },
+    }));
+  }
+
+  closePause() {
+    if (!this.isPaused) return;
+    this.isPaused = false;
+    if (this.pauseLayer) this.pauseLayer.destroy();
+    this.pauseLayer = null;
+    this.time.timeScale = this.speedMult;
+    this.tweens.timeScale = this.speedMult;
+  }
+
+  settingsCenter() {
+    this.ensureResponsiveLayout();
+    return {
+      x: this.layout.x(this.layout.viewW / 2),
+      y: this.layout.viewH / 2,
+      width: this.layout.viewW,
+      height: this.layout.viewH,
+    };
+  }
+
+  openSettings() {
+    if (this.settingsOpen || this.isPaused || this.over || this.dying || this.evolutionChoiceOpen) return;
+    this.settingsOpen = true;
+    this.settingsPrevTimeScale = this.time.timeScale;
+    this.settingsPrevTweenScale = this.tweens.timeScale;
+    this.time.timeScale = 0;
+    this.tweens.timeScale = 0;
+    this.showSettingsPanel();
+  }
+
+  showSettingsPanel() {
+    if (this.settingsLayer) this.settingsLayer.destroy();
+    const { x, y, width, height } = this.settingsCenter();
+    const layer = this.add.container(0, 0).setDepth(7100);
+    this.settingsLayer = layer;
+    layer.add(this.add.rectangle(x, y, width, height, 0x050912, 0.82).setInteractive());
+    layer.add(this.add.rectangle(x, y, 540, 600, 0x111d2e, 0.98).setStrokeStyle(2, 0x6585a2, 0.8));
+    layer.add(this.add.text(x, y - 238, t('settings.title'), {
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '42px', color: '#f5e9a7',
+    }).setOrigin(0.5));
+    layer.add(this.add.text(x, y - 152, t('settings.language'), {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '21px', color: '#8fa5bb', fontStyle: 'bold',
+    }).setOrigin(0.5));
+
+    const current = getLocale();
+    const chooseLanguage = locale => {
+      if (locale === current) return;
+      setLocale(locale);
+      this.time.timeScale = 1;
+      this.tweens.timeScale = 1;
+      window.location.reload();
+    };
+    layer.add(makeButton(this, x - 128, y - 92, 230, 68, 'ENGLISH', {
+      bg: current === 'en' ? 0x24624f : 0x2b374a,
+      stroke: current === 'en' ? 0x65d6a0 : 0x53677f,
+      fontSize: 23,
+      onClick: () => chooseLanguage('en'),
+    }));
+    layer.add(makeButton(this, x + 128, y - 92, 230, 68, '中文', {
+      bg: current === 'zh' ? 0x24624f : 0x2b374a,
+      stroke: current === 'zh' ? 0x65d6a0 : 0x53677f,
+      fontSize: 23,
+      onClick: () => chooseLanguage('zh'),
+    }));
+    layer.add(this.add.text(x, y - 37, t('settings.restart'), {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '16px', color: '#65798e',
+    }).setOrigin(0.5));
+
+    layer.add(makeButton(this, x, y + 72, 486, 94, t('settings.help'), {
+      bg: 0x273f59, stroke: 0x5f8bb0, fontSize: 29,
+      onClick: () => this.showTowerCodex(),
+    }));
+    layer.add(this.add.text(x, y + 132, t('settings.helpDesc'), {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '16px', color: '#7890a8',
+    }).setOrigin(0.5));
+    layer.add(makeButton(this, x, y + 225, 320, 66, t('common.close'), {
+      bg: 0x3a4558, stroke: 0x65748b, fontSize: 24,
+      onClick: () => this.closeSettings(),
+    }));
+  }
+
+  showTowerCodex() {
+    if (this.settingsLayer) this.settingsLayer.destroy();
+    const { x, y, width, height } = this.settingsCenter();
+    const layer = this.add.container(0, 0).setDepth(7150);
+    this.settingsLayer = layer;
+    layer.add(this.add.rectangle(x, y, width, height, 0x050912, 0.9).setInteractive());
+    layer.add(this.add.rectangle(x, y, 664, 1180, 0x0e1929, 0.99).setStrokeStyle(2, 0x6585a2, 0.8));
+    layer.add(this.add.text(x, 92, t('settings.codexTitle'), {
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '38px', color: '#f5e9a7',
+    }).setOrigin(0.5));
+    layer.add(this.add.text(x, 132, t('settings.codexHint'), {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '15px', color: '#7890a8', fontStyle: 'bold',
+    }).setOrigin(0.5));
+    layer.add(makeButton(this, x - 284, 58, 112, 48, t('common.back'), {
+      bg: 0x2b374a, stroke: 0x53677f, fontSize: 18,
+      onClick: () => this.showSettingsPanel(),
+    }));
+
+    Object.keys(ELEMENTS).forEach((elem, index) => {
+      const def = ELEMENTS[elem];
+      const branches = TOWER_BRANCHES[elem];
+      const rowY = 246 + index * 190;
+      const row = this.add.rectangle(x, rowY, 610, 178, def.color, 0.055).setStrokeStyle(1, def.color, 0.35);
+      const icon = fitTowerImageHeight(addTowerImage(this, x - 270, rowY - 38, elem, 4, 'a'), 74);
+      const name = this.add.text(x - 218, rowY - 75, def.cn, {
+        fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '22px', color: this.hexColor(def.color),
+      }).setOrigin(0, 0.5);
+      const base = this.add.text(x - 218, rowY - 49, t('settings.stats', {
+        role: def.desc,
+        lv1: Math.round(towerDmg(elem, 1)),
+        lv4: Math.round(towerDmg(elem, 4)),
+        lv7: Math.round(towerDmg(elem, 7)),
+        rate: Number(def.rate.toFixed(1)),
+        range: Math.round(towerRange(1) * (elem === 'ice' || elem === 'poison' ? 1.1 : 1)),
+      }), {
+        fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '13px', color: '#a9bbcc', fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+      const pathA4 = this.add.text(x - 218, rowY - 18, t(`codex.${elem}.a4`, { name: branches.a.cn }), {
+        fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '13px', color: '#e0e7ef',
+        wordWrap: { width: 500 },
+      }).setOrigin(0, 0.5);
+      const pathA7 = this.add.text(x - 218, rowY + 11, t(`codex.${elem}.a7`), {
+        fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '13px', color: '#8fd9bd',
+        wordWrap: { width: 500 },
+      }).setOrigin(0, 0.5);
+      const pathB4 = this.add.text(x - 218, rowY + 40, t(`codex.${elem}.b4`, { name: branches.b.cn }), {
+        fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '13px', color: '#e0e7ef',
+        wordWrap: { width: 500 },
+      }).setOrigin(0, 0.5);
+      const pathB7 = this.add.text(x - 218, rowY + 69, t(`codex.${elem}.b7`), {
+        fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '13px', color: '#8fd9bd',
+        wordWrap: { width: 500 },
+      }).setOrigin(0, 0.5);
+      layer.add([row, icon, name, base, pathA4, pathA7, pathB4, pathB7]);
+    });
+  }
+
+  closeSettings() {
+    if (!this.settingsOpen) return;
+    this.settingsOpen = false;
+    if (this.settingsLayer) this.settingsLayer.destroy();
+    this.settingsLayer = null;
+    this.time.timeScale = this.settingsPrevTimeScale ?? this.speedMult;
+    this.tweens.timeScale = this.settingsPrevTweenScale ?? this.speedMult;
+    this.settingsPrevTimeScale = null;
+    this.settingsPrevTweenScale = null;
+  }
+
+  playIceMergeAbsorbFx(a, b, x, y) {
+    const pullRing = this.add.circle(x, y - 18, 58, 0x8ee7ff, 0.05)
+      .setStrokeStyle(4, 0xcff6ff, 0.78)
+      .setScale(1.15)
+      .setDepth(2699);
+    this.tweens.add({
+      targets: pullRing,
+      scale: 0.12,
+      alpha: 0,
+      duration: 150,
+      ease: 'Quad.In',
+      onComplete: () => pullRing.destroy(),
+    });
+
+    const origins = [
+      { x: a.slot.x, y: a.slot.y - 28 },
+      { x: b.slot.x, y: b.slot.y - 28 },
+    ];
+    for (let i = 0; i < 12; i++) {
+      const origin = origins[i % origins.length];
+      const shard = this.add.image(
+        origin.x + Phaser.Math.Between(-24, 24),
+        origin.y + Phaser.Math.Between(-22, 22),
+        i % 3 === 0 ? 'ice_mote' : 'ice_shard',
+      )
+        .setAlpha(0.9)
+        .setScale(i % 3 === 0 ? 0.62 : Phaser.Math.FloatBetween(0.18, 0.34))
+        .setAngle(Phaser.Math.Between(-70, 70))
+        .setDepth(2702 + i);
+      this.tweens.add({
+        targets: shard,
+        x: x + Phaser.Math.Between(-7, 7),
+        y: y - 18 + Phaser.Math.Between(-7, 7),
+        scale: 0.04,
+        angle: shard.angle + Phaser.Math.Between(90, 210),
+        alpha: 0,
+        delay: i * 4,
+        duration: Phaser.Math.Between(115, 155),
+        ease: 'Cubic.In',
+        onComplete: () => shard.destroy(),
+      });
+    }
+  }
+
   playMergePop(t, resonance, auto) {
     const color = t.color;
     const x = t.slot.x;
     const y = t.slot.y - 24;
     // —— 合成爆点（GDD §6.1）——
     t.c.setDepth(t.slot.y + 220);
-    this.mergeBurst(x, y, color, t.lv);
+    if (t.elem === 'ice') this.playIceMergeBurstFx(x, y, t.lv, resonance.chain, auto);
+    else this.mergeBurst(x, y, color, t.lv);
     Sfx.merge(t.lv, resonance.chain);
     this.tweens.add({
       targets: t.c,
@@ -1188,13 +1554,121 @@ export class GameScene extends Phaser.Scene {
     this.triggerMergeSurge(t, resonance.multiplier, resonance.chain, auto);
   }
 
+  playIceMergeBurstFx(x, y, lv, chain = 1, auto = false) {
+    const power = Phaser.Math.Clamp(0.9 + lv * 0.08 + (chain - 1) * 0.06, 0.9, 1.55);
+    const density = auto ? 0.62 : 1;
+
+    const floorFrost = this.add.ellipse(x, y + 24, 112 * power, 38 * power, 0x69d7ff, 0.24)
+      .setStrokeStyle(3, 0xdaf8ff, 0.72)
+      .setScale(0.18)
+      .setDepth(2338);
+    this.tweens.add({
+      targets: floorFrost,
+      scaleX: 1.18,
+      scaleY: 1,
+      alpha: 0,
+      duration: 520,
+      ease: 'Cubic.Out',
+      onComplete: () => floorFrost.destroy(),
+    });
+
+    const flash = this.add.image(x, y, 'glow')
+      .setTint(0xf4fdff)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(auto ? 0.58 : 0.9)
+      .setScale(0.18 * power)
+      .setDepth(2351);
+    this.tweens.add({
+      targets: flash,
+      scale: 1.65 * power,
+      alpha: 0,
+      duration: 210,
+      ease: 'Quad.Out',
+      onComplete: () => flash.destroy(),
+    });
+
+    const outerRing = this.add.circle(x, y, 28, 0x74dfff, 0.02)
+      .setStrokeStyle(6, 0x74dfff, auto ? 0.48 : 0.84)
+      .setScale(0.2)
+      .setDepth(2348);
+    const innerRing = this.add.circle(x, y, 22, 0xffffff, 0)
+      .setStrokeStyle(2, 0xffffff, auto ? 0.48 : 0.9)
+      .setScale(0.2)
+      .setDepth(2349);
+    this.tweens.add({
+      targets: outerRing,
+      scale: 2.65 * power,
+      alpha: 0,
+      duration: 430,
+      ease: 'Cubic.Out',
+      onComplete: () => outerRing.destroy(),
+    });
+    this.tweens.add({
+      targets: innerRing,
+      scale: 3.05 * power,
+      alpha: 0,
+      delay: 35,
+      duration: 310,
+      ease: 'Cubic.Out',
+      onComplete: () => innerRing.destroy(),
+    });
+
+    const shards = this.add.particles(x, y, 'ice_shard', {
+      angle: { min: 200, max: 340 },
+      speed: { min: 120 * power, max: 285 * power },
+      gravityY: 330,
+      rotate: { min: -120, max: 120 },
+      scale: { start: 0.5 * power, end: 0.08 },
+      alpha: { start: 1, end: 0 },
+      lifespan: { min: 480, max: 720 },
+      emitting: false,
+    }).setDepth(2352);
+    shards.explode(Math.round((12 + lv * 2) * density));
+    this.time.delayedCall(820, () => shards.destroy());
+
+    const motes = this.add.particles(x, y, 'ice_mote', {
+      angle: { min: 0, max: 360 },
+      speed: { min: 45, max: 155 * power },
+      rotate: { min: -90, max: 90 },
+      scale: { start: 0.72 * power, end: 0.16 },
+      alpha: { start: 0.95, end: 0 },
+      lifespan: { min: 520, max: 820 },
+      emitting: false,
+    }).setDepth(2353);
+    motes.explode(Math.round((9 + chain * 3) * density));
+    this.time.delayedCall(920, () => motes.destroy());
+
+    for (let i = 0; i < (auto ? 2 : 4); i++) {
+      const mistScale = power * Phaser.Math.FloatBetween(0.35, 0.58);
+      const mist = this.add.image(
+        x + Phaser.Math.Between(-30, 30),
+        y + Phaser.Math.Between(-10, 16),
+        'smoke_puff',
+      )
+        .setTint(i % 2 ? 0x8edfff : 0xd9f7ff)
+        .setAlpha(0.24)
+        .setScale(mistScale)
+        .setDepth(2342 + i);
+      this.tweens.add({
+        targets: mist,
+        x: mist.x + Phaser.Math.Between(-24, 24),
+        y: mist.y - Phaser.Math.Between(20, 42),
+        scale: mistScale * Phaser.Math.FloatBetween(1.5, 1.9),
+        alpha: 0,
+        duration: Phaser.Math.Between(520, 720),
+        ease: 'Sine.Out',
+        onComplete: () => mist.destroy(),
+      });
+    }
+  }
+
   mergeBranchFor(a, b, lv, opts = {}) {
     if (lv < 4) return null;
     if (lv === 4) return opts.auto ? 'a' : null;
     return b.branch || a.branch || 'a';
   }
 
-  showEvolutionChoice(t) {
+  showEvolutionChoice(tower) {
     if (this.evolutionLayer) this.evolutionLayer.destroy();
     this.evolutionChoiceOpen = true;
     this.slowmoT = Math.max(this.slowmoT, 0.5);
@@ -1203,34 +1677,34 @@ export class GameScene extends Phaser.Scene {
     this.time.timeScale = this.speedMult * 0.5;
     this.tweens.timeScale = this.speedMult * 0.5;
 
-    const defs = TOWER_BRANCHES[t.elem];
+    const defs = TOWER_BRANCHES[tower.elem];
     const layer = this.add.container(0, 0).setDepth(4100);
     this.evolutionLayer = layer;
     layer.add(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.68).setInteractive());
 
-    const title = this.uiText(W / 2, 420, `${ELEMENTS[t.elem].cn} Lv4 进化`, 42, '#ffffff').setOrigin(0.5);
+    const title = this.uiText(W / 2, 420, t('game.evolve', { element: ELEMENTS[tower.elem].cn }), 42, '#ffffff').setOrigin(0.5);
     title.setStroke('#000000', 8);
     layer.add(title);
 
     const choose = branch => {
       if (!this.evolutionChoiceOpen) return;
-      t.setBranch(branch);
+      tower.setBranch(branch);
       this.resumeEvolutionChoice();
       this.evolutionChoiceOpen = false;
       this.evolutionLayer = null;
       layer.destroy();
       const def = defs[branch];
-      toast(this, t.slot.x, t.slot.y - 110, `${def.cn} 分支`, this.hexColor(t.color), 28);
-      this.burst(t.slot.x, t.slot.y - 26, t.color, 18, 1.1);
+      toast(this, tower.slot.x, tower.slot.y - 110, t('game.branch', { name: def.cn }), this.hexColor(tower.color), 28);
+      this.burst(tower.slot.x, tower.slot.y - 26, tower.color, 18, 1.1);
     };
 
     const addCard = (x, branch) => {
       const def = defs[branch];
       const card = this.add.rectangle(x, 615, 270, 270, 0x1e2233, 0.96)
-        .setStrokeStyle(3, t.color, 0.92)
+        .setStrokeStyle(3, tower.color, 0.92)
         .setInteractive({ useHandCursor: true });
-      const icon = fitTowerImageHeight(addTowerImage(this, x, 520, t.elem, t.lv, branch), 112).setDepth(4101);
-      const badge = this.add.circle(x - 100, 500, 21, t.color, 0.36).setStrokeStyle(2, t.color, 0.95);
+      const icon = fitTowerImageHeight(addTowerImage(this, x, 520, tower.elem, tower.lv, branch), 112).setDepth(4101);
+      const badge = this.add.circle(x - 100, 500, 21, tower.color, 0.36).setStrokeStyle(2, tower.color, 0.95);
       const short = this.uiText(x - 100, 500, def.short, 20, '#ffffff').setOrigin(0.5);
       const name = this.uiText(x, 590, def.cn, 30, '#ffe97a').setOrigin(0.5);
       const desc = this.add.text(x, 645, def.desc, {
@@ -1241,7 +1715,7 @@ export class GameScene extends Phaser.Scene {
         align: 'center',
         wordWrap: { width: 220 },
       }).setOrigin(0.5).setDepth(4101);
-      const pick = this.uiText(x, 725, '选择', 24, '#ffffff').setOrigin(0.5);
+      const pick = this.uiText(x, 725, t('game.select'), 24, '#ffffff').setOrigin(0.5);
       pick.setStroke('#000000', 5);
 
       card.on('pointerdown', () => choose(branch));
@@ -1321,18 +1795,18 @@ export class GameScene extends Phaser.Scene {
   applyResonanceMilestone(t, chain) {
     if (chain >= 3) this.screenGlow(t.color, chain >= 5 ? 0.18 : 0.12);
     if (chain === 3) {
-      this.banner('连锁共鸣!');
+      this.banner(tr('game.resonance'));
       this.applyGlobalResonanceSlow(t.color);
       Sfx.resonance(chain);
     } else if (chain === 5) {
-      this.banner('共鸣馈赠!');
+      this.banner(tr('game.resonanceGift'));
       this.grantResonanceTower(t);
       this.cameras.main.shake(180, 0.004);
       Sfx.resonance(chain);
     } else if (chain === 7) {
       this.resonanceGoldMult = Math.max(this.resonanceGoldMult, 2);
-      this.banner('金币共鸣 ×2');
-      toast(this, t.slot.x, t.slot.y - 120, '本波金币 ×2', '#ffd34e', 28);
+      this.banner(tr('game.goldResonance'));
+      toast(this, t.slot.x, t.slot.y - 120, tr('game.waveGold'), '#ffd34e', 28);
       Sfx.resonance(chain);
     }
   }
@@ -1348,7 +1822,7 @@ export class GameScene extends Phaser.Scene {
   grantResonanceTower(src) {
     const free = this.slots.filter(s => !s.tower);
     if (!free.length) {
-      toast(this, src.slot.x, src.slot.y - 120, '塔位已满', '#ff8888', 24);
+      toast(this, src.slot.x, src.slot.y - 120, t('game.slotsFull'), '#ff8888', 24);
       return;
     }
 
@@ -1372,26 +1846,79 @@ export class GameScene extends Phaser.Scene {
 
   triggerMergeSurge(t, multiplier, chain, auto) {
     const x = t.slot.x, y = t.slot.y - 8;
-    const ring = this.add.circle(x, y, 74, t.color, auto ? 0.04 : 0.08)
-      .setStrokeStyle(auto ? 3 : 5, t.color, auto ? 0.38 : 0.72)
-      .setScale(0.18)
-      .setDepth(2140);
-    this.tweens.add({
-      targets: ring,
-      scale: Math.max(1.4, t.range / 74),
-      alpha: 0,
-      duration: 480,
-      ease: 'Cubic.Out',
-      onComplete: () => ring.destroy(),
-    });
-    this.burst(x, y - 18, t.color, auto ? 10 : 24, auto ? 0.8 : 1.2);
+    if (t.elem === 'ice') {
+      this.playIceSurgeOriginFx(x, y, t.range, auto);
+    } else {
+      const ring = this.add.circle(x, y, 74, t.color, auto ? 0.04 : 0.08)
+        .setStrokeStyle(auto ? 3 : 5, t.color, auto ? 0.38 : 0.72)
+        .setScale(0.18)
+        .setDepth(2140);
+      this.tweens.add({
+        targets: ring,
+        scale: Math.max(1.4, t.range / 74),
+        alpha: 0,
+        duration: 480,
+        ease: 'Cubic.Out',
+        onComplete: () => ring.destroy(),
+      });
+      this.burst(x, y - 18, t.color, auto ? 10 : 24, auto ? 0.8 : 1.2);
+    }
     Sfx.surge();
 
     if (t.elem === 'fire') this.surgeFire(t, multiplier);
-    else if (t.elem === 'ice') this.surgeIce(t, multiplier);
+    else if (t.elem === 'ice') this.surgeIce(t, multiplier, auto);
     else if (t.elem === 'lightning') this.surgeLightning(t, multiplier);
     else if (t.elem === 'poison') this.surgePoison(t, multiplier);
     else if (t.elem === 'light') this.surgeLight(t, multiplier);
+  }
+
+  playIceSurgeOriginFx(x, y, range, auto = false) {
+    const radiusScale = Math.max(1.4, range / 74);
+    const outerRing = this.add.circle(x, y, 74, 0x62d7ff, auto ? 0.025 : 0.06)
+      .setStrokeStyle(auto ? 3 : 6, 0x62d7ff, auto ? 0.34 : 0.76)
+      .setScale(0.16)
+      .setDepth(2140);
+    const innerRing = this.add.circle(x, y, 61, 0xffffff, 0)
+      .setStrokeStyle(auto ? 1 : 2, 0xecfbff, auto ? 0.34 : 0.72)
+      .setScale(0.16)
+      .setDepth(2141);
+    this.tweens.add({
+      targets: outerRing,
+      scale: radiusScale,
+      alpha: 0,
+      duration: auto ? 430 : 560,
+      ease: 'Cubic.Out',
+      onComplete: () => outerRing.destroy(),
+    });
+    this.tweens.add({
+      targets: innerRing,
+      scale: radiusScale * 1.12,
+      alpha: 0,
+      delay: 32,
+      duration: auto ? 360 : 470,
+      ease: 'Cubic.Out',
+      onComplete: () => innerRing.destroy(),
+    });
+
+    const moteCount = auto ? 5 : 9;
+    for (let i = 0; i < moteCount; i++) {
+      const theta = (i / moteCount) * Math.PI * 2 - Math.PI / 2;
+      const mote = this.add.image(x, y - 14, i % 3 === 0 ? 'ice_shard' : 'ice_mote')
+        .setAlpha(auto ? 0.58 : 0.92)
+        .setScale(i % 3 === 0 ? 0.28 : 0.68)
+        .setAngle(Phaser.Math.RadToDeg(theta) + 90)
+        .setDepth(2143 + i);
+      this.tweens.add({
+        targets: mote,
+        x: x + Math.cos(theta) * range * Phaser.Math.FloatBetween(0.32, 0.54),
+        y: y - 14 + Math.sin(theta) * range * Phaser.Math.FloatBetween(0.18, 0.32),
+        scale: 0.08,
+        alpha: 0,
+        duration: auto ? 350 : 470,
+        ease: 'Cubic.Out',
+        onComplete: () => mote.destroy(),
+      });
+    }
   }
 
   surgeFire(t, multiplier) {
@@ -1416,6 +1943,7 @@ export class GameScene extends Phaser.Scene {
           color: t.color,
           visual: false,
           goldMult: t.goldMult,
+          sourceTower: t,
         });
         if (showVisual) {
           this.playFireBurstFx(p.x, p.y, MERGE_SURGE.fireRadius * 1.15, t.color);
@@ -1442,9 +1970,26 @@ export class GameScene extends Phaser.Scene {
       ease: 'Cubic.Out',
       onComplete: () => g.destroy(),
     });
+
+    const embers = this.add.particles(0, 0, 'fire_ember', {
+      angle: { min: 235, max: 305 },
+      speed: { min: 24, max: 72 },
+      gravityY: -18,
+      rotate: { min: -45, max: 45 },
+      scale: { start: 0.52, end: 0.05 },
+      alpha: { start: 0.9, end: 0 },
+      lifespan: { min: 380, max: 680 },
+      blendMode: Phaser.BlendModes.ADD,
+      emitting: false,
+    }).setDepth(2072);
+    const stride = Math.max(1, Math.floor(points.length / 22));
+    for (let i = 0; i < points.length; i += stride) {
+      embers.emitParticleAt(points[i].x, points[i].y - Phaser.Math.Between(0, 8), 1);
+    }
+    this.time.delayedCall(760, () => embers.destroy());
   }
 
-  surgeIce(t, multiplier) {
+  surgeIce(t, multiplier, auto = false) {
     const ground = this.enemies.filter(e => !e.dead && !e.flying);
     const center = ground.length ? Math.max(...ground.map(e => e.progress)) : this.path.total * 0.65;
     const span = 180 + t.lv * 18;
@@ -1455,20 +2000,102 @@ export class GameScene extends Phaser.Scene {
       pts.push(this.path.pointAt(d));
     }
 
-    if (pts.length > 1) {
-      const g = this.add.graphics().setDepth(2130);
-      g.lineStyle(14, t.color, 0.28);
-      g.strokePoints(pts.map(p => new Phaser.Math.Vector2(p.x, p.y)), false);
-      g.lineStyle(4, 0xffffff, 0.52);
-      g.strokePoints(pts.map(p => new Phaser.Math.Vector2(p.x, p.y)), false);
-      this.tweens.add({ targets: g, alpha: 0, duration: 560, onComplete: () => g.destroy() });
-    }
+    if (pts.length > 1) this.playIcePathFreezeFx(pts, t.lv, auto);
 
     for (const e of ground) {
       if (Math.abs(e.progress - center) > span) continue;
-      if (e.applyFreeze(duration)) this.showDmg(e.x, e.y - 42, '冻结', '#bfe8ff');
+      if (e.applyFreeze(duration)) this.showDmg(e.x, e.y - 42, tr('game.freeze'), '#bfe8ff');
     }
     Sfx.freeze();
+  }
+
+  playIcePathFreezeFx(points, lv, auto = false) {
+    const vectors = points.map(p => new Phaser.Math.Vector2(p.x, p.y));
+    const pathIce = this.add.graphics().setDepth(2128);
+    pathIce.lineStyle(auto ? 16 : 24, 0x237fab, auto ? 0.1 : 0.16);
+    pathIce.strokePoints(vectors, false);
+    pathIce.lineStyle(auto ? 9 : 14, 0x60d7ff, auto ? 0.18 : 0.3);
+    pathIce.strokePoints(vectors, false);
+    pathIce.lineStyle(auto ? 2 : 4, 0xf2fdff, auto ? 0.42 : 0.72);
+    pathIce.strokePoints(vectors, false);
+    this.tweens.add({
+      targets: pathIce,
+      alpha: 0,
+      duration: auto ? 480 : 680,
+      ease: 'Sine.Out',
+      onComplete: () => pathIce.destroy(),
+    });
+
+    const motes = this.add.particles(0, 0, 'ice_mote', {
+      angle: { min: 225, max: 315 },
+      speed: { min: 18, max: 62 },
+      rotate: { min: -90, max: 90 },
+      scale: { start: auto ? 0.42 : 0.58, end: 0.08 },
+      alpha: { start: auto ? 0.6 : 0.9, end: 0 },
+      lifespan: { min: 420, max: 720 },
+      emitting: false,
+    }).setDepth(2136);
+    const moteStride = Math.max(1, Math.floor(points.length / (auto ? 8 : 16)));
+    for (let i = 0; i < points.length; i += moteStride) {
+      motes.emitParticleAt(points[i].x, points[i].y - Phaser.Math.Between(0, 8), auto ? 1 : 2);
+    }
+    this.time.delayedCall(840, () => motes.destroy());
+
+    const crystalStride = Math.max(1, Math.floor(points.length / (auto ? 6 : 11)));
+    let visibleIndex = 0;
+    for (let i = 0; i < points.length; i += crystalStride) {
+      const p = points[i];
+      const order = visibleIndex++;
+      this.time.delayedCall(order * (auto ? 18 : 26), () => {
+        if (this.over) return;
+        const shardScale = Phaser.Math.FloatBetween(0.38, 0.62) * (1 + Math.min(lv, 8) * 0.025);
+        const shard = this.add.image(p.x, p.y + 8, 'ice_shard')
+          .setOrigin(0.5, 0.86)
+          .setAlpha(0.18)
+          .setScale(0.06)
+          .setAngle(Phaser.Math.Between(-24, 24))
+          .setDepth(2134 + order);
+        this.tweens.add({
+          targets: shard,
+          y: p.y - Phaser.Math.Between(4, 13),
+          alpha: auto ? 0.62 : 0.94,
+          scaleX: shardScale * Phaser.Math.FloatBetween(0.78, 1),
+          scaleY: shardScale * Phaser.Math.FloatBetween(1, 1.3),
+          duration: auto ? 120 : 155,
+          ease: 'Back.Out',
+          onComplete: () => {
+            this.tweens.add({
+              targets: shard,
+              y: shard.y + 5,
+              alpha: 0,
+              scaleY: shard.scaleY * 0.72,
+              delay: auto ? 90 : 170,
+              duration: auto ? 190 : 270,
+              ease: 'Sine.In',
+              onComplete: () => shard.destroy(),
+            });
+          },
+        });
+
+        if (!auto && order % 3 === 1) {
+          const mistScale = Phaser.Math.FloatBetween(0.22, 0.34);
+          const mist = this.add.image(p.x, p.y + 4, 'smoke_puff')
+            .setTint(0xa8ebff)
+            .setAlpha(0.18)
+            .setScale(mistScale)
+            .setDepth(2130);
+          this.tweens.add({
+            targets: mist,
+            y: mist.y - 18,
+            scale: mistScale * 1.75,
+            alpha: 0,
+            duration: 480,
+            ease: 'Sine.Out',
+            onComplete: () => mist.destroy(),
+          });
+        }
+      });
+    }
   }
 
   surgeLightning(t, multiplier) {
@@ -1516,8 +2143,11 @@ export class GameScene extends Phaser.Scene {
       if (e.dead) continue;
       const d = Phaser.Math.Distance.Between(x, y, e.x, e.y);
       if (d > MERGE_SURGE.poisonRadius + this.enemySize(e) * 0.5) continue;
-      const aliveStacks = e.poisons.filter(p => p.t > 0).length;
-      e.applyPoison(t.dmg * multiplier, aliveStacks + 1, false, t, { branchEffects: false });
+      const sourceOwner = this.towerLineageOwner(t);
+      const aliveStacks = e.poisons.filter(p =>
+        p.t > 0 && this.towerLineageOwner(p.sourceTower) === sourceOwner
+      ).length;
+      e.applyPoison(t.dmg * multiplier * this.plagueDamageMult(t), aliveStacks + 1, false, t, { branchEffects: false });
       this.showDmg(e.x, e.y - 42, '☠', '#9ef07a');
     }
   }
@@ -1534,7 +2164,7 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(i * 70, () => {
           if (e.dead) return;
           this.lightBeam(t.slot.x, t.slot.y - 70, e.x, e.y - 10);
-          this.showDmg(e.x, e.y - 54, '处决!', '#fff8dc');
+          this.showDmg(e.x, e.y - 54, tr('game.execute'), '#fff8dc');
           this.playExecuteFx(t, e.x, e.y);
           e.takeDamage(e.hp + 1, { trueDmg: true, cause: 'execute', sourceTower: t });
         });
@@ -1549,7 +2179,7 @@ export class GameScene extends Phaser.Scene {
       toast(this, 560, 940, `+${heal}❤`, '#fff8dc', 30);
       this.updateUI();
     } else {
-      toast(this, t.slot.x, t.slot.y - 110, '圣光守护', '#fff8dc', 24);
+      toast(this, t.slot.x, t.slot.y - 110, tr('game.radianceGuard'), '#fff8dc', 24);
     }
     this.screenGlow(t.color, 0.12);
   }
@@ -1608,6 +2238,8 @@ export class GameScene extends Phaser.Scene {
   sellTower(t) {
     const refund = Math.round(towerBasePrice(this.wave) * 0.5);
     this.gold += refund;
+    const stat = this.waveTowerDamage.get(t.id);
+    if (stat) stat.sold = true;
     t.slot.tower = null;
     this.towers = this.towers.filter(x => x !== t);
     this.burst(t.slot.x, t.slot.y - 20, 0xff9aa8, 10, 0.8);
@@ -1618,9 +2250,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   async adGiftTower() {
-    if (this.adGifts >= 2) return;
+    if (this.adGifts >= BONUS_TOWER_LIMIT) return;
     const free = this.slots.filter(s => !s.tower);
-    if (!free.length) { toast(this, this.giftBtn.x, this.giftBtn.y - 84, '塔位已满', '#ff8888', 22); return; }
+    if (!free.length) { toast(this, this.giftBtn.x, this.giftBtn.y - 84, t('game.slotsFull'), '#ff8888', 22); return; }
     const ok = await Poki.rewardedBreak();
     if (!ok) return;
     this.adGifts++;
@@ -1633,12 +2265,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   autoBuyTick() {
-    if (!tier(this.S, 'autoBuy') || this.over || this.dying || this.evolutionChoiceOpen || this.editorMode) return;
+    if (this.firstRunTutorial || !tier(this.S, 'autoBuy') || this.over || this.dying || this.evolutionChoiceOpen || this.editorMode) return;
     this.buyTower(true);
   }
 
   autoMergeTick() {
-    if (!tier(this.S, 'autoMerge') || this.over || this.dying || this.evolutionChoiceOpen || this.editorMode) return;
+    if (this.firstRunTutorial || !tier(this.S, 'autoMerge') || this.over || this.dying || this.evolutionChoiceOpen || this.editorMode) return;
     // 找最高等级的可合成对
     const groups = {};
     for (const t of this.towers) {
@@ -1663,7 +2295,7 @@ export class GameScene extends Phaser.Scene {
       const ok = await Poki.rewardedBreak();
       if (!ok) return;
       this.runSpeedUnlocked = true;
-      toast(this, this.speedBtn.x, this.speedBtn.y - 70, '本局 2 倍速解锁', '#9fe8ff', 22);
+      toast(this, this.speedBtn.x, this.speedBtn.y - 70, t('game.speedUnlock'), '#9fe8ff', 22);
       this.speedMult = 1;
     }
     this.speedMult = this.speedMult === 1 ? 2 : 1;
@@ -1683,6 +2315,12 @@ export class GameScene extends Phaser.Scene {
     this.input.on('dragstart', (pointer, obj) => {
       const t = obj.towerRef;
       if (!t || this.over || this.evolutionChoiceOpen || this.pendingTowerDraft) return;
+      if (this.firstRunTutorial && (this.tutorialStep !== 'merge'
+        || (t !== this.tutorialTowerA && t !== this.tutorialTowerB))) {
+        obj.tutorialDragAllowed = false;
+        return;
+      }
+      obj.tutorialDragAllowed = true;
       t.dragging = true;
       t.setDraggingVisual(true);
       obj.setDepth(2600);
@@ -1697,12 +2335,17 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on('drag', (pointer, obj, dragX, dragY) => {
       if (!obj.towerRef) return;
+      if (this.firstRunTutorial && !obj.tutorialDragAllowed) return;
       obj.setPosition(pointer.worldX ?? dragX, pointer.worldY ?? dragY);
     });
 
     this.input.on('dragend', (pointer, obj) => {
       const t = obj.towerRef;
       if (!t) return;
+      if (this.firstRunTutorial && !obj.tutorialDragAllowed) {
+        t.moveTo(t.slot);
+        return;
+      }
       t.dragging = false;
       t.setDraggingVisual(false);
       this.rangeCircle.setVisible(false);
@@ -1762,15 +2405,16 @@ export class GameScene extends Phaser.Scene {
     return Math.min(1, bonus);
   }
 
-  shatterDamageMult(lv) {
-    return lv >= 7 ? 2.6 : 2.2;
+  plagueDamageMult(t) {
+    if (t.elem !== 'poison' || t.branch !== 'a' || t.lv < 4) return 1;
+    return t.lv >= 7 ? PLAGUE.lv7DamageMult : PLAGUE.damageMult;
   }
 
   holyAuraBonus(t) {
     let bonus = 0;
     for (const aura of this.towers) {
       if (aura === t || aura.elem !== 'light' || aura.branch !== 'b' || aura.lv < 4) continue;
-      // v1.19：230→170，圣辉从"全队常驻"收敛为"罩 3~4 塔的站位决策"，与塔位词缀联动
+      // v1.19：230→170，圣辉从"全队常驻"收敛为"罩 3~4 塔的站位决策"
       const d = Phaser.Math.Distance.Between(aura.slot.x, aura.slot.y, t.slot.x, t.slot.y);
       if (d <= 170) bonus += aura.lv >= 7 ? 0.3 : 0.2;
     }
@@ -1782,11 +2426,11 @@ export class GameScene extends Phaser.Scene {
     if (t.lv >= 7) {
       this.atkBuffT = 3;
       this.atkBuffMult = Math.max(this.atkBuffMult || 1.3, 1.5);
-      toast(this, t.slot.x, t.slot.y - 110, '审判：全场攻速+50%', '#fff8dc', 22);
+      toast(this, t.slot.x, t.slot.y - 110, tr('game.judgmentAll'), '#fff8dc', 22);
       this.playJudgementPulseFx(t, true);
     } else {
       t.selfBuffT = 3;
-      toast(this, t.slot.x, t.slot.y - 110, '审判：攻速+50%', '#fff8dc', 22);
+      toast(this, t.slot.x, t.slot.y - 110, tr('game.judgmentSelf'), '#fff8dc', 22);
       this.playJudgementPulseFx(t, false);
     }
   }
@@ -1798,7 +2442,7 @@ export class GameScene extends Phaser.Scene {
     if (heal <= 0) return;
     this.baseHp += heal;
     this.holyHealThisWave += heal;
-    toast(this, 560, 940, `圣辉 +${heal}❤`, '#fff8dc', 26);
+    toast(this, 560, 940, tr('game.radianceHeal', { value: heal }), '#fff8dc', 26);
     this.updateUI();
   }
 
@@ -1826,19 +2470,23 @@ export class GameScene extends Phaser.Scene {
         chain.push(next);
       }
       this.playLightningChainFx(sx, sy, chain, branch);
+      let stunnedAny = false;
       chain.forEach((e, i) => {
         const ex = e.x, ey = e.y;
         const mult = (branch === 'a' && i === chain.length - 1) ? 1.75 : 1;
         const real = e.takeDamage(dmg * mult, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, e) });
         this.showDmg(ex, ey - 40, real, '#fff2a8');
         if (branch === 'b' && !e.dead) {
-          const chance = lv >= 7 ? 0.25 : 0.15;
-          if (Math.random() < chance && e.applyStun(0.5)) {
-            this.showDmg(ex, ey - 58, '眩晕', '#fff2a8');
+          const chance = lv >= 7 ? LIGHTNING_HUB.lv7StunChance : LIGHTNING_HUB.stunChance;
+          const duration = lv >= 7 ? LIGHTNING_HUB.lv7StunDuration : LIGHTNING_HUB.stunDuration;
+          if (Math.random() < chance && e.applyStun(duration)) {
+            stunnedAny = true;
+            this.showDmg(ex, ey - 58, tr('game.stun'), '#fff2a8');
             this.playStunRingFx(ex, ey);
           }
         }
       });
+      if (stunnedAny) Sfx.stun();
       Sfx.hit();
       return;
     }
@@ -1848,8 +2496,8 @@ export class GameScene extends Phaser.Scene {
       const tx = target.x, ty = target.y;
       this.lightBeam(sx, sy, tx, ty - 10);
       const threshold = branch === 'a' ? 0.25 : 0.15;
-      if (target.hp / target.maxHp <= threshold) {
-        this.showDmg(tx, ty - 50, '处决!', '#fff8dc');
+      if (!target.boss && target.hp / target.maxHp <= threshold) {
+        this.showDmg(tx, ty - 50, tr('game.execute'), '#fff8dc');
         this.playExecuteFx(t, tx, ty);
         Sfx.execute();
         this.applyJudgementBuff(t);
@@ -1864,12 +2512,39 @@ export class GameScene extends Phaser.Scene {
     }
 
     // 弹道类：火 / 冰 / 毒
-    const b = this.add.image(sx, sy, 'bullet').setTint(color).setDepth(2050).setScale(0.9);
+    const isFireProjectile = elem === 'fire';
+    const b = this.add.image(sx, sy, isFireProjectile ? 'fire_orb' : 'bullet').setDepth(2050);
+    if (isFireProjectile) {
+      const heading = Phaser.Math.Angle.Between(sx, sy, target.x, target.y - 10);
+      const headingDeg = Phaser.Math.RadToDeg(heading);
+      b
+        .setScale(branch === 'b' ? 1.05 : 0.86)
+        .setRotation(heading);
+      const trail = this.add.particles(0, 0, 'fire_ember', {
+        follow: b,
+        frequency: 28,
+        lifespan: { min: 180, max: 300 },
+        angle: { min: headingDeg + 155, max: headingDeg + 205 },
+        speed: { min: 12, max: 42 },
+        rotate: { min: -35, max: 35 },
+        scale: { start: branch === 'b' ? 0.7 : 0.5, end: 0.08 },
+        alpha: { start: 0.9, end: 0 },
+        blendMode: Phaser.BlendModes.ADD,
+      }).setDepth(2049);
+      b.setData('fireTrail', trail);
+    } else {
+      b.setTint(color).setScale(0.9);
+    }
     const dur = Phaser.Math.Distance.Between(sx, sy, target.x, target.y) / 1.4;
     this.tweens.add({
       targets: b, x: target.x, y: target.y - 10, duration: dur,
       onComplete: () => {
         const ix = b.x, iy = b.y;
+        const fireTrail = b.getData('fireTrail');
+        if (fireTrail) {
+          fireTrail.stop();
+          this.time.delayedCall(340, () => fireTrail.destroy());
+        }
         b.destroy();
         if (this.over) return;
         Sfx.hit();
@@ -1880,39 +2555,42 @@ export class GameScene extends Phaser.Scene {
             const hit = dmg * 2.2 * (crit ? 3 : 1);
             const tx = target.x, ty = target.y;
             const real = target.takeDamage(hit, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
-            this.showDmg(tx, ty - 44, crit ? `暴击 ${Math.round(real)}` : real, crit ? '#ffe97a' : '#ffb199');
+            this.showDmg(tx, ty - 44, crit ? tr('game.crit', { value: Math.round(real) }) : real, crit ? '#ffe97a' : '#ffb199');
             this.playMoltenImpactFx(sx, sy, tx, ty, crit);
             return;
           }
           const radius = (62 + lv * 2) * (branch === 'a' ? 1.6 : 1);
-          this.burst(ix, iy, color, 14, 1);
+          const impactMult = branch === 'a' ? FIRE_BRANCH_BALANCE.explosiveDamageMult : 1;
+          this.playFireBurstFx(ix, iy, radius * (branch === 'a' ? 0.72 : 0.82), color);
           for (const e of [...this.enemies]) {
             if (e.dead) continue;
             if (Phaser.Math.Distance.Between(ix, iy, e.x, e.y) <= radius + this.enemySize(e) * 0.5) {
               const ex = e.x, ey = e.y;
-              const real = e.takeDamage(dmg, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, e) });
+              const real = e.takeDamage(dmg * impactMult, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, e) });
               this.showDmg(ex, ey - 40, real, '#ffb199');
             }
           }
           if (branch === 'a') {
-            this.addBurnZone(ix, iy, dmg * 0.5, {
+            this.addBurnZone(ix, iy, dmg * FIRE_BRANCH_BALANCE.explosiveBurnDpsMult, {
               duration: lv >= 7 ? 4 : 2,
               goldMult: t.goldMult,
               sourceBonus: this.sourceBonusFor(t, target),
+              sourceTower: t,
             });
           }
         } else if (elem === 'ice') {
           if (!target.dead) {
             const slowCap = 80;
             if (branch === 'a') {
-              const novaChance = lv >= 7 ? 0.3 : 0.2;
+              const novaChance = lv >= 7 ? ICE_RIVER.lv7NovaChance : ICE_RIVER.novaChance;
               if (Math.random() < novaChance) {
-                const novaRadius = 86 + lv * 6;
-                const mainMult = lv >= 7 ? 1.9 : 1.6;
-                const splashMult = lv >= 7 ? 0.65 : 0.45;
+                const novaRadius = ICE_RIVER.novaRadius + lv * ICE_RIVER.novaRadiusPerLv;
+                const mainMult = lv >= 7 ? ICE_RIVER.lv7MainDamageMult : ICE_RIVER.mainDamageMult;
+                const splashMult = lv >= 7 ? ICE_RIVER.lv7SplashDamageMult : ICE_RIVER.splashDamageMult;
                 const slowDuration = lv >= 7 ? 2.8 : 2.2;
                 const cx = target.x, cy = target.y;
                 this.playFrostNovaFx(cx, cy, novaRadius, lv >= 7);
+                Sfx.iceNova();
                 for (const e of [...this.enemies]) {
                   if (e.dead) continue;
                   const d = Phaser.Math.Distance.Between(cx, cy, e.x, e.y);
@@ -1927,14 +2605,23 @@ export class GameScene extends Phaser.Scene {
               }
             }
             if (branch === 'b') {
-              // 碎冰 v1.18「处刑受控者」：普攻不施加减速——条件由冰河/雷枢/冰冲击提供
-              const hardCC = target.frozenT > 0 || target.stunnedT > 0;
-              const slowed = target.slowT > 0;
-              const mult = hardCC ? (lv >= 7 ? 5.5 : 4.5) : slowed ? this.shatterDamageMult(lv) : 1;
-              const tx = target.x, ty = target.y;
-              const real = target.takeDamage(dmg * mult, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
-              this.showDmg(tx, ty - 44, hardCC ? `处刑 ${Math.round(real)}` : real, hardCC ? '#e8f6ff' : '#bfe8ff');
-              if (hardCC) this.burst(tx, ty, 0xbfe8ff, 16, 1.15);
+              // 碎冰保留冰塔普攻伤害与减速，再独立判定无伤害的范围冻结。
+              const cx = target.x, cy = target.y;
+              const real = target.takeDamage(dmg, { sourceTower: t, sourceBonus: this.sourceBonusFor(t, target) });
+              this.showDmg(cx, cy - 40, real, '#bfe8ff');
+              if (!target.dead) target.applySlow(slowCap, 2, 20, 20);
+              const chance = lv >= 7 ? ICE_SHATTER.lv7FreezeChance : ICE_SHATTER.freezeChance;
+              if (Math.random() >= chance) return;
+              const radius = lv >= 7 ? ICE_SHATTER.lv7Radius : ICE_SHATTER.radius;
+              const duration = ICE_SHATTER.freezeDuration;
+              this.playFrostNovaFx(cx, cy, radius, lv >= 7);
+              for (const e of [...this.enemies]) {
+                if (e.dead) continue;
+                const distance = Phaser.Math.Distance.Between(cx, cy, e.x, e.y);
+                if (distance > radius + this.enemySize(e) * 0.5) continue;
+                if (e.applyFreeze(duration)) this.showDmg(e.x, e.y - 44, tr('game.freeze'), '#bfe8ff');
+              }
+              Sfx.shatterFreeze();
               return;
             }
             const tx = target.x, ty = target.y;
@@ -1944,756 +2631,16 @@ export class GameScene extends Phaser.Scene {
           }
         } else if (elem === 'poison') {
           if (!target.dead) {
-            target.applyPoison(dmg, lv >= 4 ? 2 : 1, false, t, { sourceBonus: this.sourceBonusFor(t, target) });
+            target.applyPoison(
+              dmg * this.plagueDamageMult(t),
+              lv >= 4 ? 2 : 1,
+              false,
+              t,
+              { sourceBonus: this.sourceBonusFor(t, target) },
+            );
             this.showDmg(target.x, target.y - 40, '☠', '#9ef07a');
           }
         }
-      },
-    });
-  }
-
-  zigzag(g, x1, y1, x2, y2) {
-    const segs = 4;
-    let px = x1, py = y1;
-    for (let i = 1; i <= segs; i++) {
-      const t = i / segs;
-      const nx = x1 + (x2 - x1) * t + (i < segs ? Phaser.Math.Between(-12, 12) : 0);
-      const ny = y1 + (y2 - y1) * t + (i < segs ? Phaser.Math.Between(-12, 12) : 0);
-      g.lineBetween(px, py, nx, ny);
-      px = nx; py = ny;
-    }
-  }
-
-  ensureVfxAnimations() {
-    const defs = [
-      { key: 'vfx_fire_burst_anim', texture: 'vfx_fire_burst_seq', end: 9, frameRate: 26, repeat: 0 },
-      { key: 'vfx_burn_loop_anim', texture: 'vfx_burn_loop_seq', end: 7, frameRate: 10, repeat: -1 },
-      { key: 'vfx_frost_nova_anim', texture: 'vfx_frost_nova_seq', end: 11, frameRate: 24, repeat: 0 },
-    ];
-    for (const def of defs) {
-      if (this.anims.exists(def.key) || !this.textures.exists(def.texture)) continue;
-      this.anims.create({
-        key: def.key,
-        frames: this.anims.generateFrameNumbers(def.texture, { start: 0, end: def.end }),
-        frameRate: def.frameRate,
-        repeat: def.repeat,
-      });
-    }
-  }
-
-  playFireBurstFx(x, y, radius, color = 0xff7733) {
-    this.ensureVfxAnimations();
-    if (!this.textures.exists('vfx_fire_burst_seq') || !this.anims.exists('vfx_fire_burst_anim')) {
-      this.burst(x, y, color, 12, 0.8);
-      return;
-    }
-    const fx = this.add.sprite(x, y, 'vfx_fire_burst_seq')
-      .setAlpha(0.98)
-      .setOrigin(0.5, 0.86)
-      .setScale((radius * 3.05) / 256)
-      .setAngle(Phaser.Math.Between(-16, 16))
-      .setDepth(2100);
-    fx.play('vfx_fire_burst_anim');
-    fx.once('animationcomplete', () => fx.destroy());
-  }
-
-  addBurnZone(x, y, dps, opts = {}) {
-    const duration = opts.duration ?? 2;
-    const radius = opts.radius ?? 58;
-    let img = null;
-    if (opts.visual !== false) {
-      this.ensureVfxAnimations();
-      const texture = this.textures.exists('vfx_burn_loop_seq')
-        ? 'vfx_burn_loop_seq'
-        : this.textures.exists('vfx_burning_ground') ? 'vfx_burning_ground' : 'glow';
-      const visualRadius = opts.visualRadius ?? radius;
-      const scale = opts.visualScale ?? (
-        texture === 'vfx_burn_loop_seq'
-          ? (visualRadius * (opts.visualScaleMult ?? 2.1)) / 256
-          : texture === 'vfx_burning_ground'
-          ? (visualRadius * (opts.visualScaleMult ?? 2.35)) / 512
-          : (opts.scale ?? 1.8)
-      );
-      const targetAlpha = opts.alpha ?? (texture === 'glow' ? 0.55 : 0.78);
-      img = texture === 'vfx_burn_loop_seq'
-        ? this.add.sprite(x, y, texture)
-        : this.add.image(x, y, texture);
-      img
-        .setAlpha(0)
-        .setScale(scale * 0.82)
-        .setAngle(Phaser.Math.Between(-18, 18))
-        .setDepth(opts.depth ?? 100);
-      if (texture === 'vfx_burn_loop_seq' && this.anims.exists('vfx_burn_loop_anim')) img.play('vfx_burn_loop_anim');
-      if (texture === 'glow') img.setTint(opts.color ?? 0xff7733);
-      this.tweens.add({
-        targets: img,
-        alpha: targetAlpha,
-        scale,
-        duration: 160,
-        ease: 'Cubic.Out',
-      });
-      this.tweens.add({
-        targets: img,
-        alpha: targetAlpha * 0.76,
-        scale: scale * 1.035,
-        delay: 160,
-        duration: 520,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.InOut',
-      });
-    }
-    this.burnZones.push({ x, y, dps, t: duration, img, tick: 0, radius, goldMult: opts.goldMult || 1, sourceBonus: opts.sourceBonus || 0 });
-  }
-
-  // ================= 特效工具 =================
-  playFrostNovaFx(x, y, radius, strong = false) {
-    this.ensureVfxAnimations();
-    if (this.textures.exists('vfx_frost_nova_seq') && this.anims.exists('vfx_frost_nova_anim')) {
-      const baseScale = (radius * (strong ? 2.85 : 2.55)) / 320;
-      const nova = this.add.sprite(x, y, 'vfx_frost_nova_seq')
-        .setAlpha(strong ? 0.98 : 0.92)
-        .setScale(baseScale)
-        .setAngle(Phaser.Math.Between(-18, 18))
-        .setDepth(2092);
-      nova.play('vfx_frost_nova_anim');
-      nova.once('animationcomplete', () => nova.destroy());
-    } else if (!this.textures.exists('vfx_frost_nova')) {
-      this.burst(x, y, 0xbfe8ff, strong ? 54 : 38, strong ? 1.45 : 1.1);
-    } else {
-      const baseScale = (radius * (strong ? 2.85 : 2.55)) / 512;
-      const nova = this.add.image(x, y, 'vfx_frost_nova')
-        .setAlpha(0)
-        .setScale(baseScale * 0.28)
-        .setAngle(Phaser.Math.Between(-18, 18))
-        .setDepth(2092);
-      this.tweens.add({
-        targets: nova,
-        alpha: strong ? 0.98 : 0.9,
-        scale: baseScale,
-        duration: 170,
-        ease: 'Back.Out',
-        onComplete: () => {
-          this.tweens.add({
-            targets: nova,
-            alpha: 0,
-            scale: baseScale * 1.08,
-            duration: strong ? 540 : 440,
-            ease: 'Sine.Out',
-            onComplete: () => nova.destroy(),
-          });
-        },
-      });
-
-      const afterImage = this.add.image(x, y, 'vfx_frost_nova')
-        .setAlpha(strong ? 0.28 : 0.2)
-        .setScale(baseScale * 0.9)
-        .setAngle(nova.angle + 30)
-        .setDepth(2089);
-      this.tweens.add({
-        targets: afterImage,
-        alpha: 0,
-        scale: baseScale * 1.34,
-        duration: strong ? 760 : 620,
-        ease: 'Cubic.Out',
-        onComplete: () => afterImage.destroy(),
-      });
-    }
-
-    const core = this.add.image(x, y, 'glow')
-      .setTint(0xffffff)
-      .setAlpha(0.92)
-      .setScale(0.22)
-      .setDepth(2094);
-    this.tweens.add({
-      targets: core,
-      scale: strong ? 1.8 : 1.38,
-      alpha: 0,
-      duration: 260,
-      ease: 'Quad.Out',
-      onComplete: () => core.destroy(),
-    });
-
-    const shards = this.add.particles(x, y, 'ice_shard', {
-      angle: { min: 0, max: 360 },
-      rotate: { min: 0, max: 360 },
-      speed: { min: strong ? 110 : 75, max: strong ? 250 : 190 },
-      scale: { start: strong ? 0.58 : 0.44, end: 0 },
-      lifespan: strong ? 620 : 500,
-      emitting: false,
-    }).setDepth(2095);
-    shards.explode(strong ? 18 : 12);
-    this.time.delayedCall(strong ? 760 : 620, () => shards.destroy());
-
-    this.cameras.main.shake(strong ? 210 : 140, strong ? 0.005 : 0.0032);
-  }
-
-  playPlagueBurstFx(x, y, radius, targets = []) {
-    const cloud = this.add.image(x, y, 'glow')
-      .setTint(0x7ede55)
-      .setAlpha(0.48)
-      .setScale(radius / 34)
-      .setDepth(2072);
-    this.tweens.add({
-      targets: cloud,
-      scale: radius / 17,
-      alpha: 0,
-      duration: 740,
-      ease: 'Cubic.Out',
-      onComplete: () => cloud.destroy(),
-    });
-
-    const ring = this.add.circle(x, y, radius, 0x7ede55, 0.08)
-      .setStrokeStyle(5, 0x9ef07a, 0.72)
-      .setScale(0.18)
-      .setDepth(2074);
-    this.tweens.add({
-      targets: ring,
-      scale: 1,
-      alpha: 0,
-      duration: 440,
-      ease: 'Cubic.Out',
-      onComplete: () => ring.destroy(),
-    });
-
-    const spores = this.add.particles(x, y, 'spark', {
-      angle: { min: 0, max: 360 },
-      speed: { min: 90, max: 280 },
-      scale: { start: 1.1, end: 0 },
-      lifespan: 760,
-      tint: 0x9ef07a,
-      emitting: false,
-    }).setDepth(2080);
-    spores.explode(32 + Math.min(22, targets.length * 3));
-    this.time.delayedCall(960, () => spores.destroy());
-
-    if (!targets.length) return;
-    const lines = this.add.graphics().setDepth(2079);
-    lines.lineStyle(2, 0x9ef07a, 0.54);
-    for (const target of targets.slice(0, 14)) {
-      lines.lineBetween(x, y, target.x, target.y);
-    }
-    this.tweens.add({
-      targets: lines,
-      alpha: 0,
-      duration: 360,
-      ease: 'Quad.Out',
-      onComplete: () => lines.destroy(),
-    });
-
-    targets.slice(0, 10).forEach((target, i) => {
-      const spore = this.add.image(x, y, 'spark')
-        .setTint(0x9ef07a)
-        .setAlpha(0.95)
-        .setScale(0.75)
-        .setDepth(2084);
-      this.tweens.add({
-        targets: spore,
-        x: target.x,
-        y: target.y - 8,
-        alpha: 0.35,
-        scale: 1.15,
-        delay: i * 18,
-        duration: 210 + i * 10,
-        ease: 'Cubic.Out',
-        onComplete: () => {
-          spore.destroy();
-          this.burst(target.x, target.y, 0x9ef07a, 5, 0.45);
-        },
-      });
-    });
-  }
-
-  playMoltenImpactFx(sx, sy, x, y, crit = false) {
-    const muzzle = this.add.image(sx, sy, 'glow')
-      .setTint(0xffe2a3)
-      .setAlpha(0.76)
-      .setScale(crit ? 0.78 : 0.58)
-      .setDepth(2075);
-    this.tweens.add({
-      targets: muzzle,
-      scale: crit ? 1.36 : 0.96,
-      alpha: 0,
-      duration: 150,
-      ease: 'Quad.Out',
-      onComplete: () => muzzle.destroy(),
-    });
-
-    const trace = this.add.graphics().setDepth(2072);
-    trace.lineStyle(crit ? 9 : 6, 0xff7a2f, crit ? 0.34 : 0.22);
-    trace.lineBetween(sx, sy, x, y - 10);
-    trace.lineStyle(crit ? 4 : 3, 0xfff2a8, 0.86);
-    trace.lineBetween(sx, sy, x, y - 10);
-    this.tweens.add({
-      targets: trace,
-      alpha: 0,
-      duration: crit ? 210 : 170,
-      ease: 'Quad.Out',
-      onComplete: () => trace.destroy(),
-    });
-
-    const core = this.add.image(x, y, 'glow')
-      .setTint(crit ? 0xfff2a8 : 0xff9b45)
-      .setAlpha(crit ? 0.82 : 0.62)
-      .setScale(crit ? 0.72 : 0.52)
-      .setDepth(2084);
-    this.tweens.add({
-      targets: core,
-      scale: crit ? 2.05 : 1.28,
-      alpha: 0,
-      duration: crit ? 290 : 220,
-      ease: 'Cubic.Out',
-      onComplete: () => core.destroy(),
-    });
-
-    const ring = this.add.circle(x, y, crit ? 48 : 34, 0xff9b45, 0)
-      .setStrokeStyle(crit ? 8 : 5, crit ? 0xfff2a8 : 0xff9b45, crit ? 0.82 : 0.58)
-      .setScale(0.18)
-      .setDepth(2083);
-    this.tweens.add({
-      targets: ring,
-      scale: crit ? 2.35 : 1.55,
-      alpha: 0,
-      duration: crit ? 360 : 260,
-      ease: 'Cubic.Out',
-      onComplete: () => ring.destroy(),
-    });
-
-    const sparks = this.add.particles(x, y, 'spark', {
-      angle: { min: 0, max: 360 },
-      speed: { min: crit ? 190 : 100, max: crit ? 420 : 280 },
-      gravityY: crit ? 260 : 180,
-      scale: { start: crit ? 1.32 : 0.9, end: 0 },
-      lifespan: crit ? 650 : 460,
-      tint: crit ? 0xffe97a : 0xff9b45,
-      emitting: false,
-    }).setDepth(2085);
-    sparks.explode(crit ? 42 : 18);
-    this.time.delayedCall(crit ? 840 : 620, () => sparks.destroy());
-
-    this.cameras.main.shake(crit ? 190 : 80, crit ? 0.006 : 0.002);
-  }
-
-  playLightningChainFx(sx, sy, chain, branch = null) {
-    const segments = [];
-    let from = { x: sx, y: sy };
-    for (const e of chain) {
-      const to = { x: e.x, y: e.y - 10 };
-      const pts = [from];
-      for (let i = 1; i <= 4; i++) {
-        const t = i / 4;
-        pts.push({
-          x: from.x + (to.x - from.x) * t + (i < 4 ? Phaser.Math.Between(-14, 14) : 0),
-          y: from.y + (to.y - from.y) * t + (i < 4 ? Phaser.Math.Between(-14, 14) : 0),
-        });
-      }
-      segments.push(pts);
-      from = to;
-    }
-
-    const g = this.add.graphics().setDepth(2102);
-    const draw = (width, color, alpha) => {
-      g.lineStyle(width, color, alpha);
-      for (const pts of segments) {
-        for (let i = 1; i < pts.length; i++) {
-          g.lineBetween(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
-        }
-      }
-    };
-    draw(branch === 'a' ? 10 : 8, 0x7df9ff, branch === 'a' ? 0.24 : 0.18);
-    draw(5, 0xfff2a8, 0.9);
-    draw(2, 0xffffff, 0.98);
-    this.tweens.add({
-      targets: g,
-      alpha: 0,
-      duration: branch === 'a' ? 240 : 190,
-      ease: 'Quad.Out',
-      onComplete: () => g.destroy(),
-    });
-
-    chain.forEach((e, i) => {
-      this.playLightningHitFx(e.x, e.y, branch === 'a' && i === chain.length - 1);
-    });
-  }
-
-  playLightningHitFx(x, y, strong = false) {
-    const flash = this.add.image(x, y - 8, 'glow')
-      .setTint(strong ? 0x7df9ff : 0xfff2a8)
-      .setAlpha(strong ? 0.62 : 0.42)
-      .setScale(strong ? 0.66 : 0.48)
-      .setDepth(2103);
-    this.tweens.add({
-      targets: flash,
-      scale: strong ? 1.45 : 1.02,
-      alpha: 0,
-      duration: strong ? 260 : 190,
-      ease: 'Cubic.Out',
-      onComplete: () => flash.destroy(),
-    });
-    if (strong) this.burst(x, y, 0x7df9ff, 10, 0.8);
-  }
-
-  playStunRingFx(x, y) {
-    this.playLightningHitFx(x, y, true);
-    const ring = this.add.circle(x, y - 14, 26, 0xfff2a8, 0)
-      .setStrokeStyle(3, 0xfff2a8, 0.82)
-      .setDepth(2105);
-    this.tweens.add({
-      targets: ring,
-      y: y - 24,
-      scale: 1.55,
-      alpha: 0,
-      duration: 360,
-      ease: 'Cubic.Out',
-      onComplete: () => ring.destroy(),
-    });
-  }
-
-  playExecuteFx(t, x, y) {
-    const topY = Math.max(-90, y - 560);
-    const h = y - topY + 96;
-    const pillar = this.add.rectangle(x, topY + h / 2, 24, h, 0xfff8dc, 0.28)
-      .setDepth(2114);
-    this.tweens.add({
-      targets: pillar,
-      scaleX: 2.15,
-      alpha: 0,
-      duration: 280,
-      ease: 'Quad.Out',
-      onComplete: () => pillar.destroy(),
-    });
-
-    const core = this.add.image(x, y - 8, 'glow')
-      .setTint(0xfff8dc)
-      .setAlpha(0.86)
-      .setScale(0.74)
-      .setDepth(2115);
-    this.tweens.add({
-      targets: core,
-      scale: 2.2,
-      alpha: 0,
-      duration: 300,
-      ease: 'Cubic.Out',
-      onComplete: () => core.destroy(),
-    });
-
-    const ring = this.add.circle(x, y, 42, 0xfff8dc, 0)
-      .setStrokeStyle(6, 0xfff8dc, 0.86)
-      .setScale(0.2)
-      .setDepth(2116);
-    this.tweens.add({
-      targets: ring,
-      scale: 2.0,
-      alpha: 0,
-      duration: 340,
-      ease: 'Cubic.Out',
-      onComplete: () => ring.destroy(),
-    });
-
-    const motes = this.add.particles(x, y - 10, 'spark', {
-      angle: { min: 235, max: 305 },
-      speed: { min: 110, max: 260 },
-      gravityY: -120,
-      scale: { start: 0.95, end: 0 },
-      lifespan: 560,
-      tint: 0xfff8dc,
-      emitting: false,
-    }).setDepth(2117);
-    motes.explode(28);
-    this.time.delayedCall(720, () => motes.destroy());
-
-    this.cameras.main.shake(130, 0.0035);
-  }
-
-  playJudgementPulseFx(t, global = false) {
-    const x = t.slot.x;
-    const y = t.slot.y - 24;
-    const color = 0xfff8dc;
-    const glow = this.add.image(x, y, 'glow')
-      .setTint(color)
-      .setAlpha(global ? 0.42 : 0.3)
-      .setScale(global ? 1.0 : 0.72)
-      .setDepth(2110);
-    this.tweens.add({
-      targets: glow,
-      scale: global ? 3.0 : 1.65,
-      alpha: 0,
-      duration: global ? 520 : 340,
-      ease: 'Cubic.Out',
-      onComplete: () => glow.destroy(),
-    });
-
-    const ring = this.add.circle(x, y, global ? 72 : 48, color, 0)
-      .setStrokeStyle(global ? 7 : 5, color, global ? 0.76 : 0.64)
-      .setScale(0.18)
-      .setDepth(2111);
-    this.tweens.add({
-      targets: ring,
-      scale: global ? 3.1 : 1.75,
-      alpha: 0,
-      duration: global ? 560 : 360,
-      ease: 'Cubic.Out',
-      onComplete: () => ring.destroy(),
-    });
-
-    if (global) this.screenGlow(color, 0.1);
-  }
-
-  mergeBurst(x, y, color, lv = 1) {
-    const count = Phaser.Math.Clamp(18 + lv * 3, 22, 40);
-    const p = this.add.particles(x, y, 'spark', {
-      angle: { min: 0, max: 360 },
-      speed: { min: 150, max: 280 },
-      scale: { start: 1.05, end: 0 },
-      lifespan: 460,
-      tint: color,
-      emitting: false,
-    }).setDepth(2350);
-    p.explode(count);
-    this.time.delayedCall(720, () => p.destroy());
-
-    const ring = this.add.circle(x, y, 24, color, 0)
-      .setStrokeStyle(5, color, 0.82)
-      .setDepth(2348);
-    this.tweens.add({
-      targets: ring,
-      scale: 2.4,
-      alpha: 0,
-      duration: 340,
-      ease: 'Cubic.Out',
-      onComplete: () => ring.destroy(),
-    });
-
-    const core = this.add.image(x, y, 'glow')
-      .setTint(color)
-      .setAlpha(0.42)
-      .setScale(0.75)
-      .setDepth(2347);
-    this.tweens.add({
-      targets: core,
-      scale: 1.7,
-      alpha: 0,
-      duration: 260,
-      ease: 'Quad.Out',
-      onComplete: () => core.destroy(),
-    });
-  }
-
-  playBossDeathFx(x, y, color, rewardDiamonds = 0) {
-    const flash = this.add.rectangle(W / 2, H / 2, W, H, 0x9fe8ff, 0.24)
-      .setDepth(2942);
-    this.tweens.add({
-      targets: flash,
-      alpha: 0,
-      duration: 360,
-      ease: 'Quad.Out',
-      onComplete: () => flash.destroy(),
-    });
-
-    const core = this.add.image(x, y, 'glow')
-      .setTint(color)
-      .setAlpha(0.72)
-      .setScale(1.1)
-      .setDepth(2338);
-    this.tweens.add({
-      targets: core,
-      scale: 2.6,
-      alpha: 0,
-      duration: 280,
-      ease: 'Cubic.Out',
-      onComplete: () => core.destroy(),
-    });
-
-    const firstRing = this.add.circle(x, y, 34, color, 0)
-      .setStrokeStyle(8, color, 0.86)
-      .setDepth(2340);
-    this.tweens.add({
-      targets: firstRing,
-      scale: 2.8,
-      alpha: 0,
-      duration: 300,
-      ease: 'Cubic.Out',
-      onComplete: () => firstRing.destroy(),
-    });
-
-    const shards = this.add.particles(x, y, 'spark', {
-      angle: { min: 0, max: 360 },
-      speed: { min: 230, max: 420 },
-      scale: { start: 1.4, end: 0 },
-      lifespan: 620,
-      tint: color,
-      emitting: false,
-    }).setDepth(2344);
-    shards.explode(56);
-    this.time.delayedCall(820, () => shards.destroy());
-
-    this.time.delayedCall(120, () => {
-      this.cameras.main.shake(280, 0.015);
-      this.burst(x, y, 0xffffff, 36, 2.1);
-      this.burst(x, y, color, 48, 2.0);
-
-      const secondRing = this.add.circle(x, y, 48, 0x9fe8ff, 0)
-        .setStrokeStyle(10, 0x9fe8ff, 0.78)
-        .setDepth(2346);
-      this.tweens.add({
-        targets: secondRing,
-        scale: 3.6,
-        alpha: 0,
-        duration: 420,
-        ease: 'Cubic.Out',
-        onComplete: () => secondRing.destroy(),
-      });
-
-      const plume = this.add.particles(x, y - 10, 'spark', {
-        angle: { min: 205, max: 335 },
-        speed: { min: 190, max: 360 },
-        gravityY: 360,
-        scale: { start: 1.2, end: 0 },
-        lifespan: 700,
-        tint: 0x9fe8ff,
-        emitting: false,
-      }).setDepth(2347);
-      plume.explode(44);
-      this.time.delayedCall(900, () => plume.destroy());
-
-      this.diamondFountain(x, y - 8, rewardDiamonds);
-      Sfx.diamond();
-    });
-  }
-
-  burst(x, y, color, n = 12, scale = 1) {
-    const p = this.add.particles(x, y, 'spark', {
-      speed: { min: 60, max: 260 }, scale: { start: 0.85 * scale, end: 0 },
-      lifespan: 420, tint: color, emitting: false,
-    }).setDepth(2200);
-    p.explode(n);
-    this.time.delayedCall(700, () => p.destroy());
-  }
-
-  showDmg(x, y, val, color) {
-    if (this.dmgCount > 34) return;
-    this.dmgCount++;
-    const str = typeof val === 'number' ? String(Math.max(0, Math.round(val))) : val;
-    const t = this.add.text(x + Phaser.Math.Between(-14, 14), y, str, {
-      fontFamily: 'Arial Black, sans-serif', fontSize: '22px', color, stroke: '#000000', strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(2300);
-    this.tweens.add({
-      targets: t, y: y - 48, alpha: 0, duration: 600, ease: 'Cubic.Out',
-      onComplete: () => { t.destroy(); this.dmgCount--; },
-    });
-  }
-
-  diamondFountain(x, y, rewardDiamonds = 0) {
-    const targetX = this.diamondIcon?.x ?? 516;
-    const targetY = this.diamondIcon?.y ?? 30;
-    const count = Math.max(6, rewardDiamonds * 3);
-    for (let i = 0; i < count; i++) {
-      const d = this.add.image(x, y, 'diamond')
-        .setDepth(2425 + i)
-        .setScale(0.55 + Math.random() * 0.18)
-        .setAngle(Phaser.Math.Between(-25, 25));
-      const angle = Phaser.Math.Between(210, 330) * Math.PI / 180;
-      const dist = Phaser.Math.Between(62, 150);
-      const apexX = x + Math.cos(angle) * dist;
-      const apexY = y + Math.sin(angle) * dist - Phaser.Math.Between(18, 70);
-      this.tweens.add({
-        targets: d,
-        x: apexX,
-        y: apexY,
-        scale: d.scaleX + 0.3,
-        angle: d.angle + Phaser.Math.Between(-120, 120),
-        duration: 190 + i * 10,
-        ease: 'Cubic.Out',
-        onComplete: () => {
-          this.tweens.add({
-            targets: d,
-            x: targetX + Phaser.Math.Between(-8, 8),
-            y: targetY + Phaser.Math.Between(-5, 5),
-            scale: 0.42,
-            angle: d.angle + Phaser.Math.Between(180, 420),
-            alpha: 0.78,
-            delay: i * 24,
-            duration: 430 + Phaser.Math.Between(0, 130),
-            ease: 'Cubic.In',
-            onComplete: () => {
-              d.destroy();
-              if (i === count - 1) this.popDiamondText();
-            },
-          });
-        },
-      });
-    }
-  }
-
-  popDiamondText() {
-    this.tweens.killTweensOf(this.diamondText);
-    this.diamondText.setScale(1);
-    this.tweens.add({
-      targets: this.diamondText,
-      scale: 1.28,
-      duration: 95,
-      ease: 'Quad.Out',
-      yoyo: true,
-    });
-  }
-
-  rollGoldTo(targetGold) {
-    const from = this.displayGold ?? targetGold;
-    if (this.goldRollTween) this.goldRollTween.stop();
-    this.goldRollTween = this.tweens.addCounter({
-      from,
-      to: targetGold,
-      duration: 360,
-      ease: 'Cubic.Out',
-      onUpdate: tw => {
-        this.displayGold = tw.getValue();
-        this.goldText.setText(String(Math.floor(this.displayGold)));
-      },
-      onComplete: () => {
-        this.displayGold = targetGold;
-        this.goldRollTween = null;
-        this.goldText.setText(String(Math.floor(this.displayGold)));
-      },
-    });
-    this.tweens.killTweensOf(this.goldText);
-    this.goldText.setScale(1);
-    this.tweens.add({
-      targets: this.goldText,
-      scale: 1.18,
-      duration: 90,
-      ease: 'Quad.Out',
-      yoyo: true,
-    });
-  }
-
-  coinFly(x, y, amount = 0) {
-    if (this.coinCount > 7) return;
-    const targetX = this.coinIcon?.x ?? 332;
-    const targetY = this.coinIcon?.y ?? 30;
-    this.coinCount++;
-    const c = this.add.image(x, y, 'coin').setDepth(2400);
-    const label = amount > 0
-      ? this.add.text(x + 18, y - 18, `+${amount}`, {
-        fontFamily: 'Arial Black, sans-serif',
-        fontSize: '22px',
-        color: '#ffd34e',
-        stroke: '#000000',
-        strokeThickness: 4,
-      }).setOrigin(0.5).setDepth(2401)
-      : null;
-    const targets = label ? [c, label] : [c];
-    this.tweens.add({
-      targets,
-      x: targetX + 8,
-      y: targetY,
-      scale: 0.7,
-      duration: 480,
-      ease: 'Cubic.In',
-      onComplete: () => {
-        c.destroy();
-        if (label) label.destroy();
-        this.coinCount--;
-        Sfx.coin();
       },
     });
   }
@@ -2718,13 +2665,13 @@ export class GameScene extends Phaser.Scene {
     this.baseHp = 0;
     this.updateUI();
     this.cameras.main.shake(500, 0.015);
-    this.banner('最后一战!');
+    this.banner(t('game.lastStand'));
     Sfx.lastStand();
 
     this.lastStandOverlay = this.add.rectangle(W / 2, H / 2, W, H, 0x9b1022, 0)
       .setDepth(2250);
     this.tweens.add({ targets: this.lastStandOverlay, alpha: 0.28, duration: 220 });
-    this.lastStandText = this.uiText(W / 2, 160, '最后一战 5.0', 34, '#ffccd2')
+    this.lastStandText = this.uiText(W / 2, 160, t('game.lastStandTime', { value: '5.0' }), 34, '#ffccd2')
       .setOrigin(0.5)
       .setDepth(3000);
     this.lastStandText.setStroke('#390611', 7);
@@ -2733,7 +2680,7 @@ export class GameScene extends Phaser.Scene {
   updateLastStand(realDt) {
     if (!this.lastStandActive) return;
     this.lastStandT -= realDt;
-    if (this.lastStandText) this.lastStandText.setText(`最后一战 ${Math.max(0, this.lastStandT).toFixed(1)}`);
+    if (this.lastStandText) this.lastStandText.setText(t('game.lastStandTime', { value: Math.max(0, this.lastStandT).toFixed(1) }));
     if (this.lastStandCanClutch && !this.lastStandLeaked && this.spawnLeft <= 0 && this.enemies.length === 0) {
       this.finishLastStand(true);
     } else if (this.lastStandT <= 0) {
@@ -2750,7 +2697,7 @@ export class GameScene extends Phaser.Scene {
     if (success) {
       this.baseHp = 1;
       this.updateUI();
-      this.banner('绝地翻盘!');
+      this.banner(t('game.clutch'));
       Sfx.clutch();
       this.flash.setFillStyle(0xffe97a, 0.72).setAlpha(0.72);
       this.tweens.add({
@@ -2803,9 +2750,9 @@ export class GameScene extends Phaser.Scene {
       const layer = this.add.container(0, 0).setDepth(4000);
       layer.add(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.7).setInteractive());
       layer.add(this.add.rectangle(W / 2, 560, 560, 420, 0x1e2233).setStrokeStyle(3, 0x4a5578));
-      layer.add(this.uiText(W / 2, 420, '💔 基地告急!', 44, '#ff7a7a').setOrigin(0.5));
-      layer.add(this.uiText(W / 2, 490, `第 ${this.wave} 波`, 28, '#c9d2f0').setOrigin(0.5));
-      layer.add(makeButton(this, W / 2, 590, 420, 80, '📺 复活 (回50%血+清场)', {
+      layer.add(this.uiText(W / 2, 420, t('game.baseCritical'), 44, '#ff7a7a').setOrigin(0.5));
+      layer.add(this.uiText(W / 2, 490, t('game.waveOnly', { value: this.wave }), 28, '#c9d2f0').setOrigin(0.5));
+      layer.add(makeButton(this, W / 2, 590, 420, 80, t('game.reviveAd'), {
         bg: 0x6b4a86, stroke: 0xb07fe0, fontSize: 25,
         onClick: async () => {
           const ok = await Poki.rewardedBreak();
@@ -2814,7 +2761,7 @@ export class GameScene extends Phaser.Scene {
           this.revive();
         },
       }));
-      layer.add(makeButton(this, W / 2, 690, 420, 70, '结束本局', {
+      layer.add(makeButton(this, W / 2, 690, 420, 70, t('game.endRun'), {
         bg: 0x51586e, fontSize: 24,
         onClick: () => { layer.destroy(); this.endRun(); },
       }));
@@ -2837,110 +2784,10 @@ export class GameScene extends Phaser.Scene {
     this.dying = false;
     this.flash.setAlpha(0.7);
     this.tweens.add({ targets: this.flash, alpha: 0, duration: 600 });
-    this.banner('复活!');
+    this.banner(t('game.revived'));
     this.updateUI();
     this.waveState = 'idle';
     this.endWave();
-  }
-
-  buildDeathAnalysis(S) {
-    const wave = this.deathWave || this.wave;
-    const candidates = [];
-    const leakEntries = Object.entries(this.leakStats).sort((a, b) => b[1] - a[1]);
-    const topLeak = leakEntries[0];
-
-    if (topLeak && topLeak[1] >= 3) candidates.push(this.leakDiagnosis(topLeak[0], topLeak[1], wave));
-    if (wave % 5 === 0 || this.leakStats.boss > 0) {
-      candidates.push({
-        key: 'boss_wave',
-        text: `你死于第 ${wave} 波：Boss 波前囤好合成对，连锁共鸣一波爆发`,
-      });
-    }
-
-    const expectedLv = this.expectedHighestLv(wave);
-    if (this.highestLv < expectedLv) {
-      candidates.push({
-        key: 'low_highest_lv',
-        text: `你死于第 ${wave} 波：最高塔只有 Lv${this.highestLv} → 少买多合，等级就是战力`,
-        upgradeId: 'startLv',
-      });
-    }
-
-    const freeSlots = this.slots.filter(s => !s.tower).length;
-    if (freeSlots > 0 && this.gold >= towerPrice(this.wave, 0)) {
-      candidates.push({
-        key: 'idle_gold_slots',
-        text: `你死于第 ${wave} 波：还空着 ${freeSlots} 个塔位 → 金币别攥着，塔位空一格就是防线漏一格`,
-        upgradeId: 'startGold',
-      });
-    }
-
-    candidates.push({
-      key: 'fallback',
-      text: `你死于第 ${wave} 波：三选一优先凑对子，Boss 前留一次合成冲击`,
-    });
-
-    const diagnosis = this.pickDiagnosis(candidates, S);
-    diagnosis.elements = this.elementSummary();
-    return diagnosis;
-  }
-
-  leakDiagnosis(typeKey, count, wave) {
-    const name = TYPE_CN[typeKey] || typeKey;
-    if (typeKey === 'tank') {
-      return {
-        key: 'leak_tank',
-        text: `你死于第 ${wave} 波：铁盾兵漏了 ${count} 只 → ☠毒塔无视护甲，专克铁罐头`,
-      };
-    }
-    if (typeKey === 'runner') {
-      return {
-        key: 'leak_runner',
-        text: `你死于第 ${wave} 波：疾行者漏了 ${count} 只 → ❄冰塔减速，先稳住跑得快的`,
-      };
-    }
-    if (typeKey === 'flyer') {
-      return {
-        key: 'leak_flyer',
-        text: `你死于第 ${wave} 波：飞行兵漏了 ${count} 只 → ✨光塔和⚡电塔更适合拦截空中目标`,
-        upgradeId: 'unlockLight',
-      };
-    }
-    if (typeKey === 'splitter' || typeKey === 'mini') {
-      return {
-        key: 'leak_splitter',
-        text: `你死于第 ${wave} 波：分裂怪漏了 ${count} 只 → 🔥火塔溅射能更快清掉小怪群`,
-      };
-    }
-    return {
-      key: `leak_${typeKey}`,
-      text: `你死于第 ${wave} 波：${name}漏了 ${count} 只 → 少买多合，把主力塔等级抬起来`,
-      upgradeId: 'startLv',
-    };
-  }
-
-  expectedHighestLv(wave) {
-    if (wave >= 30) return 7;
-    if (wave >= 20) return 5;
-    if (wave >= 10) return 3;
-    if (wave >= 5) return 2;
-    return 1;
-  }
-
-  pickDiagnosis(candidates, S) {
-    const primary = candidates[0];
-    const repeated = primary.key === S.lastDiagnosisKey ? (S.lastDiagnosisCount || 0) + 1 : 1;
-    const chosen = repeated > 2 && candidates[1] ? candidates[1] : primary;
-    S.lastDiagnosisCount = chosen.key === S.lastDiagnosisKey ? repeated : 1;
-    S.lastDiagnosisKey = chosen.key;
-    return { ...chosen };
-  }
-
-  elementSummary() {
-    const counts = {};
-    for (const t of this.towers) counts[t.elem] = (counts[t.elem] || 0) + 1;
-    const parts = Object.entries(counts).map(([elem, count]) => `${ELEMENTS[elem].cn}×${count}`);
-    return parts.length ? parts.join('  ') : '无塔';
   }
 
   async endRun() {
@@ -2950,6 +2797,7 @@ export class GameScene extends Phaser.Scene {
     Poki.gameplayStop();
     const S = this.S;
     const diagnosis = this.buildDeathAnalysis(S);
+    const waveDps = this.buildWaveDpsSummary();
     const deathBonus = Math.floor(this.wave / DIAMOND.deathBonusPerWave);
     this.diamondsRun += deathBonus;
     S.diamonds += this.diamondsRun;
@@ -2961,14 +2809,15 @@ export class GameScene extends Phaser.Scene {
     Sfx.gameOver();
     await Poki.commercialBreak();
     this.scene.start('Result', {
-      wave: this.wave, kills: this.kills, dRun: this.diamondsRun, newBest, deathBonus, diagnosis,
+      wave: this.wave, kills: this.kills, dRun: this.diamondsRun, newBest, deathBonus, diagnosis, waveDps,
+      difficulty: this.difficulty,
     });
   }
 
   // ================= 主循环 =================
   update(time, delta) {
     this.ensureResponsiveLayout();
-    if (this.over || this.editorMode) return;
+    if (this.over || this.editorMode || this.isPaused || this.settingsOpen) return;
     let dts = (delta / 1000) * this.speedMult;
     if (this.lastStandActive) this.updateLastStand(delta / 1000);
     // 慢镜（按真实时间衰减）
@@ -2979,6 +2828,7 @@ export class GameScene extends Phaser.Scene {
     if (this.evolutionChoiceOpen) dts *= 0.5;
     if (this.lastStandActive) dts *= 0.5;
     if (this.dying) return;
+    if (this.waveState === 'active') this.waveCombatTime += dts;
 
     // 敌人
     for (const e of [...this.enemies]) e.update(dts);
@@ -3007,14 +2857,31 @@ export class GameScene extends Phaser.Scene {
         z.tick = 0.25;
         for (const e of [...this.enemies]) {
           if (!e.dead && !e.flying && Phaser.Math.Distance.Between(z.x, z.y, e.x, e.y) < z.radius) {
-            e.takeDamage(z.dps * 0.25, { trueDmg: true, goldMult: z.goldMult, sourceBonus: z.sourceBonus || 0 });
+            e.takeDamage(z.dps * 0.25, {
+              trueDmg: true,
+              goldMult: z.goldMult,
+              sourceBonus: z.sourceBonus || 0,
+              sourceTower: z.sourceTower,
+            });
           }
         }
       }
       if (z.t <= 0) {
         if (z.img) {
+          for (const child of z.img.list || []) {
+            this.tweens.killTweensOf(child);
+            if (child.texture?.key === 'fire_ember' && child.stop) child.stop();
+          }
           this.tweens.killTweensOf(z.img);
-          z.img.destroy();
+          this.tweens.add({
+            targets: z.img,
+            alpha: 0,
+            scaleX: 0.92,
+            scaleY: 0.86,
+            duration: 180,
+            ease: 'Quad.In',
+            onComplete: () => z.img.destroy(),
+          });
         }
       }
     }
@@ -3032,3 +2899,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 }
+
+Object.assign(GameScene.prototype, gameRunAnalysisMethods);
+Object.defineProperties(GameScene.prototype, gameVfxMethods);

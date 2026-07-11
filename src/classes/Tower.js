@@ -1,5 +1,17 @@
-import { ELEMENTS, MAX_LV, TOWER_BRANCHES, towerDmg, towerRange } from '../config.js';
+import {
+  ELEMENTS, FIRE_BRANCH_BALANCE, MAX_LV, TOWER_BRANCHES, TOWER_RANGE_MULT,
+  towerDmg, towerRange,
+} from '../config.js';
 import { addTowerImage, applyTowerImage, fitTowerImageHeight } from '../textures.js';
+
+const BRANCH_MARKS = {
+  fire: { a: '✹', b: '♨' },
+  ice: { a: '❄', b: '✦' },
+  lightning: { a: 'ϟ', b: '⌾' },
+  poison: { a: '☣', b: '⬡' },
+  light: { a: '✧', b: '☀' },
+};
+const BRANCH_ACCENTS = { a: 0xffd166, b: 0x72d6ff };
 
 export class Tower {
   constructor(scene, slot, elem, lv, branch = null) {
@@ -7,6 +19,7 @@ export class Tower {
     this.slot = slot;        // { x, y, tower } 引用
     this.elem = elem;
     this.lv = lv;
+    this.id = scene.nextTowerId++;
     this.branch = lv >= 4 ? branch : null;
     this.cooldown = 0;
     this.dragging = false;
@@ -32,9 +45,10 @@ export class Tower {
     }).setOrigin(0.5);
     const children = [this.shadow, this.highlightGlow];
     if (lv >= 4) {
-      this.branchBadge = scene.add.circle(-22, 8, 13, 0x1c1f2e, this.branch ? 0.92 : 0.72).setStrokeStyle(2, e.color);
+      this.branchBadge = scene.add.circle(-22, 8, 13, 0x1c1f2e, this.branch ? 0.92 : 0.72)
+        .setStrokeStyle(2, this.branchAccent());
       this.branchText = scene.add.text(-22, 8, this.branchLabel(), {
-        fontFamily: 'Arial Black, sans-serif', fontSize: '15px', color: this.branch ? '#ffffff' : '#ffe97a',
+        fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '16px', color: this.branch ? '#ffffff' : '#ffe97a',
       }).setOrigin(0.5);
     }
     // Lv8 常驻光环
@@ -52,13 +66,15 @@ export class Tower {
     this.c.towerRef = this;
   }
 
-  get dmg() { return towerDmg(this.elem, this.lv) * (this.slot.affix?.dmgMult || 1); }
-  get range() { return towerRange(this.lv); }
+  get dmg() { return towerDmg(this.elem, this.lv); }
+  get range() { return towerRange(this.lv) * (TOWER_RANGE_MULT[this.elem] || 1); }
   get rate() {
-    const branchMult = this.elem === 'fire' && this.branch === 'b' && this.lv >= 4 ? 0.5 : 1;
-    return ELEMENTS[this.elem].rate * (this.slot.affix?.rateMult || 1) * branchMult;
+    const branchMult = this.elem === 'fire' && this.branch === 'b' && this.lv >= 4
+      ? FIRE_BRANCH_BALANCE.moltenRateMult
+      : 1;
+    return ELEMENTS[this.elem].rate * branchMult;
   }
-  get goldMult() { return this.slot.affix?.goldMult || 1; }
+  get goldMult() { return 1; }
   get color() { return ELEMENTS[this.elem].color; }
   get branchDef() { return this.branch ? TOWER_BRANCHES[this.elem]?.[this.branch] : null; }
 
@@ -72,7 +88,11 @@ export class Tower {
   resetCooldown() { this.cooldown = 1; }
 
   branchLabel() {
-    return TOWER_BRANCHES[this.elem]?.[this.branch]?.short || '?';
+    return BRANCH_MARKS[this.elem]?.[this.branch] || '?';
+  }
+
+  branchAccent() {
+    return BRANCH_ACCENTS[this.branch] || this.color;
   }
 
   refreshVisual() {
@@ -87,6 +107,7 @@ export class Tower {
     this.branchText.setText(this.branchLabel());
     this.branchText.setColor(this.branch ? '#ffffff' : '#ffe97a');
     this.branchBadge.setAlpha(this.branch ? 1 : 0.72);
+    this.branchBadge.setStrokeStyle(2, this.branchAccent());
   }
 
   // 开火后坐力小动画

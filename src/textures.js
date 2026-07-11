@@ -422,6 +422,51 @@ export function generateTextures(scene) {
   g.fillCircle(6, 6, 6);
   g.generateTexture('spark', 12, 12);
 
+  // Fire VFX uses dedicated silhouettes instead of tinting the generic round spark.
+  // The layered warm values keep the shapes readable both with normal and ADD blending.
+  g.clear();
+  g.fillStyle(0x9f1c12, 0.92);
+  g.fillPoints(p([[18, 0], [27, 15], [32, 27], [28, 43], [18, 54], [7, 45], [3, 31], [9, 18], [12, 7]]), true);
+  g.fillStyle(0xff6a1f, 1);
+  g.fillPoints(p([[18, 8], [25, 21], [25, 34], [18, 48], [10, 39], [10, 28], [15, 18]]), true);
+  g.fillStyle(0xffd34e, 1);
+  g.fillPoints(p([[18, 18], [22, 28], [20, 40], [15, 43], [13, 34], [16, 27]]), true);
+  g.fillStyle(0xfff7c2, 0.96);
+  g.fillPoints(p([[18, 26], [20, 32], [17, 39], [15, 34]]), true);
+  g.generateTexture('fire_lick', 36, 56);
+
+  g.clear();
+  g.fillStyle(0xb52212, 0.88);
+  g.fillTriangle(0, 12, 18, 1, 18, 23);
+  g.fillEllipse(23, 12, 32, 24);
+  g.fillStyle(0xff7a20, 1);
+  g.fillTriangle(7, 12, 22, 5, 22, 19);
+  g.fillEllipse(25, 12, 23, 17);
+  g.fillStyle(0xffd54d, 1);
+  g.fillEllipse(28, 12, 15, 11);
+  g.fillStyle(0xfff8ce, 1);
+  g.fillEllipse(31, 11, 8, 6);
+  g.generateTexture('fire_orb', 40, 24);
+
+  g.clear();
+  g.fillStyle(0xf04418, 0.9);
+  g.fillPoints(p([[5, 0], [10, 6], [7, 17], [3, 17], [0, 7]]), true);
+  g.fillStyle(0xffc83d, 1);
+  g.fillPoints(p([[5, 3], [8, 7], [6, 14], [3, 11]]), true);
+  g.fillStyle(0xfff5b0, 0.92);
+  g.fillTriangle(5, 5, 6, 9, 4, 10);
+  g.generateTexture('fire_ember', 10, 18);
+
+  g.clear();
+  g.fillStyle(0xffffff, 0.18);
+  g.fillCircle(17, 25, 14);
+  g.fillCircle(29, 23, 15);
+  g.fillCircle(24, 13, 13);
+  g.fillStyle(0xffffff, 0.11);
+  g.fillCircle(13, 16, 9);
+  g.fillCircle(35, 17, 9);
+  g.generateTexture('smoke_puff', 48, 48);
+
   g.clear();
   g.fillStyle(0x9fe8ff, 0.94);
   g.fillPoints(p([[9, 0], [16, 8], [12, 25], [9, 28], [6, 25], [2, 8]]), true);
@@ -430,6 +475,24 @@ export function generateTextures(scene) {
   g.lineStyle(1, 0x4fc3ff, 0.55);
   g.strokePoints(p([[9, 0], [16, 8], [12, 25], [9, 28], [6, 25], [2, 8]]), true, true);
   g.generateTexture('ice_shard', 18, 30);
+
+  g.clear();
+  g.lineStyle(2, 0xe8f8ff, 0.98);
+  g.lineBetween(9, 1, 9, 17);
+  g.lineBetween(2, 5, 16, 13);
+  g.lineBetween(2, 13, 16, 5);
+  g.lineStyle(1, 0x75d9ff, 0.9);
+  g.lineBetween(9, 4, 6, 2);
+  g.lineBetween(9, 4, 12, 2);
+  g.lineBetween(9, 14, 6, 16);
+  g.lineBetween(9, 14, 12, 16);
+  g.lineBetween(5, 7, 3, 9);
+  g.lineBetween(13, 11, 15, 9);
+  g.lineBetween(5, 11, 3, 9);
+  g.lineBetween(13, 7, 15, 9);
+  g.fillStyle(0xffffff, 1);
+  g.fillCircle(9, 9, 2);
+  g.generateTexture('ice_mote', 18, 18);
 
   g.clear();
   g.fillStyle(0xffffff, 1);

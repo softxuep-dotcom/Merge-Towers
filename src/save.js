@@ -1,12 +1,14 @@
 // localStorage 存档
 const KEY = 'mt_save_v1';
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 const DEFAULT = {
   v: SAVE_VERSION,
   best: 0,          // 历史最高波
   diamonds: 0,      // 局外货币
   runs: 0,          // 总局数
+  tutorialDone: false, // 是否完成首次基础教学
+  tutorialVersion: 0,  // 已完成的教学版本
   up: {},           // 升级档位 { id: tier }
   lastSeen: 0,      // 离线结算时间戳
   coupon: false,    // 下局开局金币 +50% 券
@@ -40,13 +42,20 @@ function cleanUpgrades(up) {
 
 export function sanitizeSave(raw = {}) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const upgrades = cleanUpgrades(src.up);
+  // v3：光塔改为第 10 波后自然解锁；已购买旧解锁项的存档退还 120 钻石。
+  const legacyLightRefund = upgrades.unlockLight ? 120 : 0;
+  delete upgrades.unlockLight;
   return {
     ...DEFAULT,
     v: SAVE_VERSION,
     best: asInt(src.best),
-    diamonds: asInt(src.diamonds),
+    diamonds: asInt(src.diamonds) + legacyLightRefund,
     runs: asInt(src.runs),
-    up: cleanUpgrades(src.up),
+    // 老存档已有对局记录时视为已掌握基础操作，避免升级后强制重走教学。
+    tutorialDone: asBool(src.tutorialDone) || asInt(src.runs) > 0,
+    tutorialVersion: asInt(src.tutorialVersion),
+    up: upgrades,
     lastSeen: asInt(src.lastSeen),
     coupon: asBool(src.coupon),
     muted: asBool(src.muted),
@@ -93,10 +102,10 @@ export function resetSave() {
 
 export function tier(s, id) { return s?.up?.[id] || 0; }
 
-// 已解锁元素：火冰电初始；毒随局内波次自然入池；光暂走局外解锁
-export function unlockedElements(s, wave = 1) {
+// 已解锁元素：火冰电初始；通关第 5 波后解锁毒，通关第 10 波后解锁光。
+export function unlockedElements(_s, wave = 1) {
   const list = ['fire', 'ice', 'lightning'];
-  if (wave >= 8 || tier(s, 'unlockPoison')) list.push('poison');
-  if (tier(s, 'unlockLight')) list.push('light');
+  if (wave > 5) list.push('poison');
+  if (wave > 10) list.push('light');
   return list;
 }

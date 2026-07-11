@@ -331,6 +331,28 @@ function noise({ dur = 0.08, vol = 0.15, delay = 0 }) {
   src.start(t0);
 }
 
+// 冰系使用带通噪声做出细碎冰晶质感，避免和命中/爆炸的宽频噪声混在一起。
+function iceNoise({ freq = 4200, q = 1.4, dur = 0.08, vol = 0.08, delay = 0 }) {
+  const c = ac();
+  if (!c || muted || audioPaused()) return;
+  const t0 = c.currentTime + delay;
+  const len = Math.floor(c.sampleRate * dur);
+  const buf = c.createBuffer(1, len, c.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.8);
+  const src = c.createBufferSource();
+  const filter = c.createBiquadFilter();
+  const gain = c.createGain();
+  src.buffer = buf;
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(freq, t0);
+  filter.Q.setValueAtTime(q, t0);
+  gain.gain.setValueAtTime(vol, t0);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  src.connect(filter).connect(gain).connect(sfxGain || c.destination);
+  src.start(t0);
+}
+
 // 大调音阶 do re mi fa so la si do —— 合成等级越高音越高（GDD §6.8）
 const SCALE = [0, 2, 4, 5, 7, 9, 11, 12];
 export const Sfx = {
@@ -364,7 +386,33 @@ export const Sfx = {
   wave()  { tone({ freq: 392, dur: 0.12, type: 'triangle', vol: 0.2 }); tone({ freq: 523, dur: 0.15, type: 'triangle', vol: 0.2, delay: 0.1 }); },
   gameOver() { [392, 330, 262, 196].forEach((f, i) => tone({ freq: f, dur: 0.3, type: 'triangle', vol: 0.22, delay: i * 0.18 })); },
   diamond() { tone({ freq: 1760, end: 2349, dur: 0.12, type: 'sine', vol: 0.15 }); },
-  freeze() { tone({ freq: 1200, end: 400, dur: 0.2, type: 'sine', vol: 0.12 }); },
+  freeze() {
+    // 短促上扬后锁定：用于路径冻结，听感像冰层瞬间结晶。
+    iceNoise({ freq: 5200, q: 2.2, dur: 0.075, vol: 0.11 });
+    tone({ freq: 740, end: 1480, dur: 0.09, type: 'triangle', vol: 0.105 });
+    tone({ freq: 1480, end: 1120, dur: 0.2, type: 'sine', vol: 0.075, delay: 0.055 });
+  },
+  iceNova() {
+    // 霜爆：低频扩张主体 + 向外散开的高频冰晶尾音。
+    tone({ freq: 190, end: 82, dur: 0.32, type: 'sine', vol: 0.15 });
+    iceNoise({ freq: 3600, q: 1.1, dur: 0.18, vol: 0.13 });
+    [1568, 1175, 880, 659].forEach((f, i) => {
+      tone({ freq: f, end: f * 0.72, dur: 0.18, type: 'triangle', vol: 0.08, delay: i * 0.026 });
+    });
+  },
+  shatterFreeze() {
+    // 碎冰：三次不规则脆裂，末尾补一个低频冻结落点。
+    [0, 0.028, 0.064].forEach((delay, i) => {
+      iceNoise({ freq: 6100 - i * 950, q: 3.2, dur: 0.055 + i * 0.012, vol: 0.105 - i * 0.016, delay });
+      tone({ freq: 2100 - i * 370, end: 920 - i * 120, dur: 0.085, type: 'triangle', vol: 0.07, delay });
+    });
+    tone({ freq: 310, end: 155, dur: 0.24, type: 'sine', vol: 0.105, delay: 0.055 });
+  },
+  stun() {
+    noise({ dur: 0.045, vol: 0.075 });
+    tone({ freq: 2400, end: 520, dur: 0.11, type: 'square', vol: 0.065 });
+    tone({ freq: 460, end: 180, dur: 0.14, type: 'sawtooth', vol: 0.08, delay: 0.025 });
+  },
   surge() {
     noise({ dur: 0.12, vol: 0.16 });
     tone({ freq: 170, end: 420, dur: 0.16, type: 'sawtooth', vol: 0.13 });
