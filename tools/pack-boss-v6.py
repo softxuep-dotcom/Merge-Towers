@@ -117,8 +117,8 @@ def write_atlas(frames: dict[str, list[Image.Image]]) -> None:
                 "sourceSize": {"w": FRAME_SIZE, "h": FRAME_SIZE},
             }
 
-    image_name = "enemy-boss-smooth-v6.png"
-    atlas.save(OUTPUT_DIR / image_name, optimize=True)
+    image_name = "enemy-boss-smooth-v6.webp"
+    atlas.save(OUTPUT_DIR / image_name, "WEBP", quality=92, alpha_quality=100, method=6, exact=True)
     data["meta"] = {
         "app": "Merge Towers Boss v6 normalized direction packer",
         "version": "6.0",

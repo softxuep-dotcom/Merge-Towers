@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "art-source" / "enemies" / "generated-chatgpt-v2"
 FRAME_OUT = ROOT / "art-source" / "enemies" / "smooth-3dir-v2"
-ATLAS_OUT = ROOT / "assets" / "enemies"
+ATLAS_OUT = ROOT / "public" / "assets" / "enemies"
 PREVIEW_OUT = ROOT / "art-source" / "enemies" / "enemy-smooth-3dir-v2-preview.png"
 PADDING = 2
 
@@ -176,8 +176,8 @@ def write_atlas(enemy: str, frames: dict[str, list[Image.Image]], size: int) -> 
                 "sourceSize": {"w": size, "h": size},
             }
 
-    image_name = f"enemy-{enemy}-smooth-v2.png"
-    atlas.save(ATLAS_OUT / image_name)
+    image_name = f"enemy-{enemy}-smooth-v2.webp"
+    atlas.save(ATLAS_OUT / image_name, "WEBP", quality=92, alpha_quality=100, method=6, exact=True)
     data["meta"] = {
         "app": "Codex ChatGPT five-frame three-direction enemy sheet packer",
         "version": "2.0",

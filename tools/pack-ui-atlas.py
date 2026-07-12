@@ -9,7 +9,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 UI_DIR = ROOT / "public" / "assets" / "ui"
 SOURCE_IMAGE = ROOT / "art-source" / "ui" / "ui-components-v1-source.png"
-OUTPUT_IMAGE = UI_DIR / "ui-components-v1.png"
+OUTPUT_IMAGE = UI_DIR / "ui-components-v1.webp"
 OUTPUT_JSON = UI_DIR / "ui-components-v1.json"
 PADDING = 2
 ROW_NAMES = (
@@ -65,9 +65,9 @@ def main() -> None:
         "scale": "1",
     }
 
-    temp_image = OUTPUT_IMAGE.with_suffix(".tmp.png")
+    temp_image = OUTPUT_IMAGE.with_suffix(".tmp.webp")
     temp_json = OUTPUT_JSON.with_suffix(".tmp.json")
-    atlas.save(temp_image, optimize=True, compress_level=9)
+    atlas.save(temp_image, "WEBP", quality=92, alpha_quality=100, method=6, exact=True)
     temp_json.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     temp_image.replace(OUTPUT_IMAGE)
     temp_json.replace(OUTPUT_JSON)

@@ -304,7 +304,7 @@
   "meta": {
     "app": "Merge Towers Boss v6 normalized direction packer",
     "version": "6.0",
-    "image": "enemy-boss-smooth-v6.png",
+    "image": "enemy-boss-smooth-v6.webp",
     "format": "RGBA8888",
     "size": {
       "w": 812,

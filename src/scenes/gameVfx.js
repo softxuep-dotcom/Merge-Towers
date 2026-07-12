@@ -235,46 +235,8 @@ class GameVfx {
         .setDepth(2092);
       nova.play('vfx_frost_nova_anim');
       nova.once('animationcomplete', () => nova.destroy());
-    } else if (!this.textures.exists('vfx_frost_nova')) {
-      this.burst(x, y, 0xbfe8ff, strong ? 54 : 38, strong ? 1.45 : 1.1);
     } else {
-      const baseScale = (radius * (strong ? 2.85 : 2.55)) / 512;
-      const nova = this.add.image(x, y, 'vfx_frost_nova')
-        .setAlpha(0)
-        .setScale(baseScale * 0.28)
-        .setAngle(Phaser.Math.Between(-18, 18))
-        .setDepth(2092);
-      this.tweens.add({
-        targets: nova,
-        alpha: strong ? 0.98 : 0.9,
-        scale: baseScale,
-        duration: 170,
-        ease: 'Back.Out',
-        onComplete: () => {
-          this.tweens.add({
-            targets: nova,
-            alpha: 0,
-            scale: baseScale * 1.08,
-            duration: strong ? 540 : 440,
-            ease: 'Sine.Out',
-            onComplete: () => nova.destroy(),
-          });
-        },
-      });
-
-      const afterImage = this.add.image(x, y, 'vfx_frost_nova')
-        .setAlpha(strong ? 0.28 : 0.2)
-        .setScale(baseScale * 0.9)
-        .setAngle(nova.angle + 30)
-        .setDepth(2089);
-      this.tweens.add({
-        targets: afterImage,
-        alpha: 0,
-        scale: baseScale * 1.34,
-        duration: strong ? 760 : 620,
-        ease: 'Cubic.Out',
-        onComplete: () => afterImage.destroy(),
-      });
+      this.burst(x, y, 0xbfe8ff, strong ? 54 : 38, strong ? 1.45 : 1.1);
     }
 
     const core = this.add.image(x, y, 'glow')

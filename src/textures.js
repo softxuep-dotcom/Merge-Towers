@@ -3,7 +3,7 @@
 import { ELEMENTS, ENEMY_TYPES } from './config.js';
 
 export const PAINTED_TOWER_ATLAS = 'tower_atlas_painted';
-export const PAINTED_TOWER_ATLAS_IMAGE = 'assets/towers/towers-painted-v1.png';
+export const PAINTED_TOWER_ATLAS_IMAGE = 'assets/towers/towers-painted-v1.webp';
 export const PAINTED_TOWER_ATLAS_JSON = 'assets/towers/towers-painted-v1.json';
 
 const PAINTED_TOWER_FRAMES = {
@@ -81,7 +81,7 @@ export function paintedEnemyAtlasKey(typeKey) {
 export function paintedEnemyAtlasImage(typeKey) {
   const key = paintedEnemyKey(typeKey);
   const version = key === 'boss' ? 'v6' : key === 'priest' ? 'v1' : 'v2';
-  return `assets/enemies/enemy-${key}-smooth-${version}.png`;
+  return `assets/enemies/enemy-${key}-smooth-${version}.webp`;
 }
 
 export function paintedEnemyAtlasJson(typeKey) {

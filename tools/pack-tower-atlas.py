@@ -8,8 +8,8 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "art-source" / "towers" / "sources-v1"
-OUTPUT_DIR = ROOT / "assets" / "towers"
-IMAGE_NAME = "towers-painted-v1.png"
+OUTPUT_DIR = ROOT / "public" / "assets" / "towers"
+IMAGE_NAME = "towers-painted-v1.webp"
 JSON_NAME = "towers-painted-v1.json"
 
 ELEMENTS = ["fire", "ice", "lightning", "poison", "light"]
@@ -75,7 +75,17 @@ def main() -> None:
                 "sourceSize": {"w": CELL_W, "h": CELL_H},
             }
 
-    atlas.save(OUTPUT_DIR / IMAGE_NAME, optimize=True)
+    # WebP keeps the alpha channel while cutting the initial-download cost far
+    # below the original PNG. Quality 92 retains the painted detail at runtime
+    # display sizes; alpha_quality=100 prevents halos around tower silhouettes.
+    atlas.save(
+        OUTPUT_DIR / IMAGE_NAME,
+        "WEBP",
+        quality=92,
+        alpha_quality=100,
+        method=6,
+        exact=True,
+    )
     data = {
         "frames": frames,
         "meta": {
