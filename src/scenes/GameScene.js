@@ -303,7 +303,7 @@ export class GameScene extends Phaser.Scene {
 
     // 广告送塔
     this.giftBtn = makeHudButton(this, 625, 1138, 158, 58, '', {
-      simple: true, frame: 'button_secondary', icon: 'gift', iconSize: 30, iconX: -50, labelX: 18, fontSize: 14,
+      simple: true, frame: 'button_secondary', icon: 'gift', iconSize: 26, iconX: -57, labelX: 9, fontSize: 11,
       onClick: () => this.adGiftTower(),
     }).setDepth(1002);
 
@@ -561,7 +561,7 @@ export class GameScene extends Phaser.Scene {
     const afford = !this.pendingTowerDraft && !this.towerChoiceLayer && this.gold >= cost && this.slots.some(s => !s.tower);
     this.buyBtn.setSkin(afford ? 'button_primary' : 'button_disabled');
     const giftLeft = BONUS_TOWER_LIMIT - this.adGifts;
-    this.giftBtn.label.setText(`${Math.max(0, giftLeft)}/${BONUS_TOWER_LIMIT}`);
+    this.giftBtn.label.setText(t('game.gift', { left: Math.max(0, giftLeft), total: BONUS_TOWER_LIMIT }));
     this.giftBtn.setEnabled(giftLeft > 0);
     if (this.firstRunTutorial) {
       this.giftBtn.setEnabled(false);

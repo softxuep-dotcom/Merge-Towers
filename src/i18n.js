@@ -63,7 +63,7 @@ const EN = {
   'shop.title': '⚒ WORKSHOP', 'shop.noDiamonds': 'NOT ENOUGH DIAMONDS', 'shop.upgraded': 'UPGRADED!',
   'shop.ad': '📺 WATCH AD +{value}💎 ({left} LEFT)', 'shop.adDone': '📺 DAILY LIMIT REACHED',
   'game.wave': 'WAVE {wave} · {difficulty}', 'game.build': 'BUILD\n💰 {cost}', 'game.place': 'PLACE\nTOWER',
-  'game.choose': 'CHOOSE\n...', 'game.gift': 'BONUS TOWER\n{left} LEFT', 'game.giftDone': 'BONUS USED',
+  'game.choose': 'CHOOSE\n...', 'game.gift': 'REWARDED AD · ADVANCED TOWER\n{left}/{total}', 'game.giftDone': 'REWARD USED',
   'game.call': 'CALL WAVE EARLY  ·  +10% GOLD', 'game.sell': 'SELL\n50%', 'game.next': 'NEXT ▶ {icons}',
   'game.nextInfo': 'WAVE {wave} · {count} ENEMIES · {icons}\n{event}',
   'waveEvent.normal': 'NORMAL WAVE',
@@ -190,7 +190,7 @@ const ZH = {
   'shop.title': '⚒ 强化工坊', 'shop.noDiamonds': '钻石不足', 'shop.upgraded': '已强化!',
   'shop.ad': '📺 看广告 +{value}💎 (今日{left}次)', 'shop.adDone': '📺 今日已领完',
   'game.wave': '第 {wave} 波 · {difficulty}', 'game.build': '造 塔\n💰 {cost}', 'game.place': '点空位\n放 塔',
-  'game.choose': '选元素\n...', 'game.gift': '高级塔\n剩 {left} 次', 'game.giftDone': '奖励已用完',
+  'game.choose': '选元素\n...', 'game.gift': '广告激励 · 高级塔\n{left}/{total}', 'game.giftDone': '奖励已用完',
   'game.call': '提前召唤  ·  +10%金币', 'game.sell': '回收\n50%', 'game.next': '下一波 ▶ {icons}',
   'game.nextInfo': '第{wave}波 · {count}名敌人 · {icons}\n{event}',
   'waveEvent.normal': '普通波次',
@@ -281,7 +281,25 @@ const CORE = {
   'pt-BR': { 'settings.title': 'CONFIGURAÇÕES', 'settings.language': 'IDIOMA', 'settings.help': 'GUIA DE TORRES', 'settings.restart': 'Mudar o idioma reinicia o jogo', 'common.close': 'FECHAR', 'menu.start': 'INICIAR PARTIDA', 'menu.workshop': 'OFICINA', 'menu.best': 'MELHOR PARTIDA', 'menu.resources': 'RECURSOS', 'difficulty.easy': 'FÁCIL', 'difficulty.normal': 'NORMAL', 'difficulty.hard': 'DIFÍCIL', 'game.pauseTitle': 'JOGO PAUSADO', 'game.resume': 'CONTINUAR', 'game.home': 'MENU PRINCIPAL', 'result.retry': 'JOGAR NOVAMENTE', 'result.menu': 'MENU PRINCIPAL' },
   ru: { 'settings.title': 'НАСТРОЙКИ', 'settings.language': 'ЯЗЫК', 'settings.help': 'СПРАВОЧНИК БАШЕН', 'settings.restart': 'Смена языка перезапустит игру', 'common.close': 'ЗАКРЫТЬ', 'menu.start': 'НАЧАТЬ ИГРУ', 'menu.workshop': 'МАСТЕРСКАЯ', 'menu.best': 'ЛУЧШИЙ РЕЗУЛЬТАТ', 'menu.resources': 'РЕСУРСЫ', 'difficulty.easy': 'ЛЕГКО', 'difficulty.normal': 'НОРМАЛЬНО', 'difficulty.hard': 'СЛОЖНО', 'game.pauseTitle': 'ПАУЗА', 'game.resume': 'ПРОДОЛЖИТЬ', 'game.home': 'ГЛАВНОЕ МЕНЮ', 'result.retry': 'ЕЩЁ РАЗ', 'result.menu': 'ГЛАВНОЕ МЕНЮ' },
 };
-const DICTS = { en: EN, 'zh-CN': ZH, ...CORE };
+const GIFT_TRANSLATIONS = {
+  fr: 'PUB RÉCOMPENSÉE · TOUR AVANCÉE\n{left}/{total}',
+  it: 'ANNUNCIO PREMIO · TORRE AVANZATA\n{left}/{total}',
+  de: 'BELOHNUNGSWERBUNG · HOHER TURM\n{left}/{total}',
+  es: 'ANUNCIO PREMIADO · TORRE AVANZADA\n{left}/{total}',
+  tr: 'ÖDÜLLÜ REKLAM · GELİŞMİŞ KULE\n{left}/{total}',
+  ja: 'リワード広告・上級タワー\n{left}/{total}',
+  ko: '보상형 광고 · 고급 타워\n{left}/{total}',
+  'pt-BR': 'ANÚNCIO PREMIADO · TORRE AVANÇADA\n{left}/{total}',
+  ru: 'РЕКЛАМА ЗА НАГРАДУ · ПРОДВИНУТАЯ БАШНЯ\n{left}/{total}',
+};
+const DICTS = {
+  en: EN,
+  'zh-CN': ZH,
+  ...Object.fromEntries(Object.entries(CORE).map(([locale, dict]) => [
+    locale,
+    { ...dict, 'game.gift': GIFT_TRANSLATIONS[locale] },
+  ])),
+};
 
 function browserLocale() {
   const languages = typeof navigator !== 'undefined' ? (navigator.languages || [navigator.language]) : [];

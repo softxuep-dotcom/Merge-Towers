@@ -394,9 +394,13 @@ export class Enemy {
     if (!this.usesPaintedSprite || (Math.abs(dx) < 0.25 && Math.abs(dy) < 0.25)) return;
     let direction = paintedEnemyPlaybackDirection(dx, dy);
     if (!direction) return;
-    // Boss direction must read clearly on the road: reserve the front strip for
-    // predominantly downward travel and keep horizontal travel on the true side strip.
-    if (this.boss && dy > 0 && Math.abs(dy) >= Math.abs(dx) * 1.15) direction = 'front';
+    // The Boss is wide enough that its diagonal strip reads as walking downward.
+    // Once horizontal movement dominates (notably on the wave-10 rightward turn),
+    // use the true side strip instead of waiting for the generic diagonal threshold.
+    if (this.boss) {
+      if (Math.abs(dx) > Math.abs(dy)) direction = dx > 0 ? 'right' : 'left';
+      else if (dy > 0 && Math.abs(dy) >= Math.abs(dx) * 1.15) direction = 'front';
+    }
     const sourceDirection = paintedEnemyAnimationSource(this.scene, this.paintedKey, direction);
     if (!sourceDirection) return;
     const animKey = paintedEnemyAnimKey(this.paintedKey, sourceDirection);
