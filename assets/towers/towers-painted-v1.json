@@ -304,7 +304,7 @@
   "meta": {
     "app": "Codex painted tower atlas packer",
     "version": "1.0",
-    "image": "towers-painted-v1.png",
+    "image": "towers-painted-v1.webp",
     "format": "RGBA8888",
     "size": {
       "w": 1292,
