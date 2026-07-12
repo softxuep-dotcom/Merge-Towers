@@ -61,8 +61,11 @@ export class Tower {
     if (lv >= 4) children.push(this.branchBadge, this.branchText);
     this.c = scene.add.container(slot.x, slot.y - 8, children);
     this.c.setDepth(slot.y);
-    this.c.setSize(96, 100);
-    this.c.setInteractive({ draggable: true, useHandCursor: true });
+    // The painted crystal extends well above the base. Keep the entire visible
+    // tower inside the hit area so grabbing the crystal works on touch screens.
+    this.c.setSize(112, 180);
+    this.c.setInteractive({ useHandCursor: true });
+    scene.input.setDraggable(this.c);
     this.c.towerRef = this;
   }
 

@@ -2484,7 +2484,7 @@ export class GameScene extends Phaser.Scene {
       obj.setDepth(2600);
       this.rangeCircle.setPosition(t.slot.x, t.slot.y).setRadius(t.range).setVisible(true);
       this.sellZone.setScale(1.06);
-      this.sellSkin.setTint(0xffa4b2).setScale(1.06);
+      this.sellSkin.setFillStyle(0x6b3545, 0.96).setScale(1.06);
       this.sellIcon.setScale(this.sellIconBaseScaleX * 1.06, this.sellIconBaseScaleY * 1.06);
       this.showFreeSlots(true);
       // 高亮可合成目标
@@ -2496,7 +2496,10 @@ export class GameScene extends Phaser.Scene {
     this.input.on('drag', (pointer, obj, dragX, dragY) => {
       if (!obj.towerRef) return;
       if (this.firstRunTutorial && !obj.tutorialDragAllowed) return;
-      obj.setPosition(pointer.worldX ?? dragX, pointer.worldY ?? dragY);
+      // Phaser's drag coordinates retain the initial grab offset. Using the
+      // pointer position directly makes a tower jump when its crystal is held,
+      // which also shifts the eventual slot / merge hit test.
+      obj.setPosition(dragX, dragY);
     });
 
     this.input.on('dragend', (pointer, obj) => {
@@ -2510,7 +2513,7 @@ export class GameScene extends Phaser.Scene {
       t.setDraggingVisual(false);
       this.rangeCircle.setVisible(false);
       this.sellZone.setScale(1);
-      this.sellSkin.clearTint().setScale(1);
+      this.sellSkin.setFillStyle(0x3d2932, 0.92).setScale(1);
       this.sellIcon.setScale(this.sellIconBaseScaleX, this.sellIconBaseScaleY);
       this.showFreeSlots(false);
       for (const o of this.towers) o.setHighlight(false);
