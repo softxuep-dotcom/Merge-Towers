@@ -1,0 +1,335 @@
+{
+  "frames": {
+    "button_primary": {
+      "frame": {
+        "x": 2,
+        "y": 2,
+        "w": 249,
+        "h": 135
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 249,
+        "h": 135
+      },
+      "sourceSize": {
+        "w": 249,
+        "h": 135
+      }
+    },
+    "button_secondary": {
+      "frame": {
+        "x": 253,
+        "y": 2,
+        "w": 249,
+        "h": 135
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 249,
+        "h": 135
+      },
+      "sourceSize": {
+        "w": 249,
+        "h": 135
+      }
+    },
+    "button_danger": {
+      "frame": {
+        "x": 504,
+        "y": 2,
+        "w": 249,
+        "h": 135
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 249,
+        "h": 135
+      },
+      "sourceSize": {
+        "w": 249,
+        "h": 135
+      }
+    },
+    "button_disabled": {
+      "frame": {
+        "x": 755,
+        "y": 2,
+        "w": 248,
+        "h": 135
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 248,
+        "h": 135
+      },
+      "sourceSize": {
+        "w": 248,
+        "h": 135
+      }
+    },
+    "tab_cyan": {
+      "frame": {
+        "x": 2,
+        "y": 139,
+        "w": 246,
+        "h": 204
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 246,
+        "h": 204
+      },
+      "sourceSize": {
+        "w": 246,
+        "h": 204
+      }
+    },
+    "resource_pill": {
+      "frame": {
+        "x": 250,
+        "y": 143,
+        "w": 246,
+        "h": 195
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 246,
+        "h": 195
+      },
+      "sourceSize": {
+        "w": 246,
+        "h": 195
+      }
+    },
+    "title_ribbon": {
+      "frame": {
+        "x": 498,
+        "y": 142,
+        "w": 256,
+        "h": 198
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 198
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 198
+      }
+    },
+    "tooltip": {
+      "frame": {
+        "x": 756,
+        "y": 165,
+        "w": 239,
+        "h": 152
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 239,
+        "h": 152
+      },
+      "sourceSize": {
+        "w": 239,
+        "h": 152
+      }
+    },
+    "panel_9slice": {
+      "frame": {
+        "x": 2,
+        "y": 354,
+        "w": 252,
+        "h": 216
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 252,
+        "h": 216
+      },
+      "sourceSize": {
+        "w": 252,
+        "h": 216
+      }
+    },
+    "card_portrait": {
+      "frame": {
+        "x": 256,
+        "y": 349,
+        "w": 220,
+        "h": 225
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 220,
+        "h": 225
+      },
+      "sourceSize": {
+        "w": 220,
+        "h": 225
+      }
+    },
+    "modal_panel": {
+      "frame": {
+        "x": 478,
+        "y": 345,
+        "w": 256,
+        "h": 234
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 234
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 234
+      }
+    },
+    "boss_bar": {
+      "frame": {
+        "x": 736,
+        "y": 405,
+        "w": 255,
+        "h": 114
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 255,
+        "h": 114
+      },
+      "sourceSize": {
+        "w": 255,
+        "h": 114
+      }
+    },
+    "progress_bar": {
+      "frame": {
+        "x": 2,
+        "y": 657,
+        "w": 255,
+        "h": 67
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 255,
+        "h": 67
+      },
+      "sourceSize": {
+        "w": 255,
+        "h": 67
+      }
+    },
+    "tower_slot": {
+      "frame": {
+        "x": 259,
+        "y": 581,
+        "w": 233,
+        "h": 220
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 233,
+        "h": 220
+      },
+      "sourceSize": {
+        "w": 233,
+        "h": 220
+      }
+    },
+    "level_badge": {
+      "frame": {
+        "x": 494,
+        "y": 589,
+        "w": 208,
+        "h": 205
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 208,
+        "h": 205
+      },
+      "sourceSize": {
+        "w": 208,
+        "h": 205
+      }
+    },
+    "corner_brackets": {
+      "frame": {
+        "x": 704,
+        "y": 591,
+        "w": 204,
+        "h": 199
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 204,
+        "h": 199
+      },
+      "sourceSize": {
+        "w": 204,
+        "h": 199
+      }
+    }
+  },
+  "meta": {
+    "app": "Merge Towers trimmed UI component packer",
+    "version": "1.1",
+    "image": "ui-components-v1.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 1005,
+      "h": 803
+    },
+    "scale": "1"
+  }
+}

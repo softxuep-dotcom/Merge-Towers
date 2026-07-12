@@ -49,7 +49,7 @@ export function fitTowerImageHeight(image, displayHeight) {
 }
 
 export const PAINTED_ENEMY_LEGACY_ATLAS = 'enemy_atlas';
-export const PAINTED_ENEMY_KEYS = ['slime', 'mini', 'runner', 'tank', 'flyer', 'splitter', 'boss'];
+export const PAINTED_ENEMY_KEYS = ['slime', 'mini', 'runner', 'tank', 'flyer', 'splitter', 'priest', 'boss'];
 export const PAINTED_ENEMY_SOURCE_DIRECTIONS = ['front', 'left', 'front_left'];
 export const PAINTED_ENEMY_PLAY_DIRECTIONS = ['front', 'left', 'right', 'front_left', 'front_right'];
 export const PAINTED_ENEMY_MIN_FRAMES = 5;
@@ -79,11 +79,15 @@ export function paintedEnemyAtlasKey(typeKey) {
 }
 
 export function paintedEnemyAtlasImage(typeKey) {
-  return `assets/enemies/enemy-${paintedEnemyKey(typeKey)}-smooth-v2.png`;
+  const key = paintedEnemyKey(typeKey);
+  const version = key === 'boss' ? 'v6' : key === 'priest' ? 'v1' : 'v2';
+  return `assets/enemies/enemy-${key}-smooth-${version}.png`;
 }
 
 export function paintedEnemyAtlasJson(typeKey) {
-  return `assets/enemies/enemy-${paintedEnemyKey(typeKey)}-smooth-v2.json`;
+  const key = paintedEnemyKey(typeKey);
+  const version = key === 'boss' ? 'v6' : key === 'priest' ? 'v1' : 'v2';
+  return `assets/enemies/enemy-${key}-smooth-${version}.json`;
 }
 
 export function paintedEnemyTextureKey(scene, typeKey) {
@@ -145,10 +149,11 @@ function paintedEnemyFrameRate(typeKey, frameCount) {
 }
 
 export function paintedEnemyFrameTarget(typeKey, type) {
-  if (typeKey === 'boss') return 112;
+  if (typeKey === 'boss') return 104;
   if (typeKey === 'tank') return 82;
   if (typeKey === 'flyer') return 78;
   if (typeKey === 'splitter') return 76;
+  if (typeKey === 'priest') return 82;
   if (typeKey === 'runner') return 64;
   if (typeKey === 'mini') return 42;
   return (type.size + 8) * 2;
@@ -494,6 +499,33 @@ export function generateTextures(scene) {
   g.fillCircle(9, 9, 2);
   g.generateTexture('ice_mote', 18, 18);
 
+  // A directional, faceted ice bolt. It points to the right so the projectile
+  // can simply rotate toward its target at runtime.
+  g.clear();
+  g.fillStyle(0x2b8fc4, 0.32);
+  g.fillPoints(p([[1, 10], [13, 3], [36, 5], [47, 10], [36, 15], [13, 17]]), true);
+  g.fillStyle(0x73d9ff, 0.94);
+  g.fillPoints(p([[4, 10], [17, 3], [38, 6], [47, 10], [38, 14], [17, 17]]), true);
+  g.fillStyle(0xd8f7ff, 0.95);
+  g.fillPoints(p([[10, 9], [20, 5], [39, 7], [47, 10], [25, 11]]), true);
+  g.fillStyle(0xffffff, 0.92);
+  g.fillPoints(p([[20, 6], [39, 8], [47, 10], [28, 10]]), true);
+  g.fillStyle(0x3aaee4, 0.8);
+  g.fillTriangle(8, 10, 1, 4, 18, 8);
+  g.fillTriangle(10, 11, 2, 17, 21, 12);
+  g.lineStyle(1, 0xe9fbff, 0.9);
+  g.strokePoints(p([[4, 10], [17, 3], [38, 6], [47, 10], [38, 14], [17, 17]]), true, true);
+  g.lineBetween(17, 3, 25, 11);
+  g.lineBetween(25, 11, 38, 14);
+  g.generateTexture('ice_bolt', 48, 20);
+
+  g.clear();
+  g.fillStyle(0x78dcff, 0.65);
+  g.fillPoints(p([[5, 0], [8, 5], [5, 10], [2, 5]]), true);
+  g.fillStyle(0xf3fdff, 0.95);
+  g.fillPoints(p([[5, 1], [6, 5], [5, 8], [4, 5]]), true);
+  g.generateTexture('ice_speck', 10, 10);
+
   g.clear();
   g.fillStyle(0xffffff, 1);
   g.fillCircle(8, 8, 8);
@@ -554,3 +586,4 @@ export function generateTextures(scene) {
 
   g.destroy();
 }
+import Phaser from 'phaser';

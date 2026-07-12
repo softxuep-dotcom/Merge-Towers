@@ -1,3 +1,4 @@
+import Phaser from 'phaser';
 import { W, H } from './config.js';
 import { BootScene } from './scenes/BootScene.js';
 import { MenuScene } from './scenes/MenuScene.js';

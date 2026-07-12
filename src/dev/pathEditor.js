@@ -79,3 +79,4 @@ export function startPathEditor(scene) {
   redraw();
   return state;
 }
+import Phaser from 'phaser';

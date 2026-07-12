@@ -35,6 +35,82 @@ export function makeButton(scene, x, y, w, h, label, opts = {}) {
   return c;
 }
 
+export function makeHudButton(scene, x, y, w, h, label, opts = {}) {
+  const normalFrame = opts.frame ?? 'button_secondary';
+  const disabledFrame = opts.disabledFrame ?? 'button_disabled';
+  const simpleSkins = {
+    button_primary: { fill: 0x285f4e, stroke: 0x5d9d82 },
+    button_secondary: { fill: 0x263246, stroke: 0x52627a },
+    button_danger: { fill: 0x3d2932, stroke: 0x76505e },
+    button_disabled: { fill: 0x252b36, stroke: 0x444d5e },
+  };
+  const simpleSkin = frame => simpleSkins[frame] || simpleSkins.button_secondary;
+  const bg = opts.simple
+    ? scene.add.rectangle(0, 0, w, h, opts.bg ?? simpleSkin(normalFrame).fill, opts.bgAlpha ?? 0.92)
+      .setStrokeStyle(opts.strokeWidth ?? 1, opts.stroke ?? simpleSkin(normalFrame).stroke, 0.9)
+    : scene.add.nineslice(0, 0, 'ui_components', normalFrame, w, h, 42, 42, 28, 28);
+  const iconSize = opts.iconSize ?? Math.min(54, h * 0.62);
+  const iconX = opts.icon
+    ? (opts.iconX ?? (-w / 2 + Math.max(30, iconSize * 0.72)))
+    : 0;
+  const icon = opts.icon
+    ? scene.add.image(iconX, opts.iconY ?? 0, 'ui_icons', opts.icon).setDisplaySize(iconSize, iconSize)
+    : null;
+  const labelX = opts.labelX ?? (icon ? Math.min(w * 0.16, iconSize * 0.58) : 0);
+  const txt = scene.add.text(labelX, opts.labelY ?? 0, label, {
+    fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
+    fontSize: (opts.fontSize ?? 24) + 'px',
+    color: opts.color ?? '#ffffff',
+    fontStyle: 'bold',
+    align: 'center',
+    stroke: opts.stroke ?? '#142033',
+    strokeThickness: opts.strokeThickness ?? 3,
+  }).setOrigin(0.5);
+  const c = scene.add.container(x, y, [bg, ...(icon ? [icon] : []), txt]);
+  c.setSize(w, h).setInteractive({ useHandCursor: true });
+  c.bg = bg;
+  c.icon = icon;
+  c.label = txt;
+  c.normalFrame = normalFrame;
+  c.simple = !!opts.simple;
+  c.enabled = true;
+  c.setSkin = frame => {
+    c.normalFrame = frame;
+    if (c.simple) {
+      const skin = simpleSkin(frame);
+      bg.setFillStyle(skin.fill, opts.bgAlpha ?? 0.92).setStrokeStyle(opts.strokeWidth ?? 1, skin.stroke, 0.9);
+    } else {
+      bg.setTexture('ui_components', frame);
+      bg.setSlices(w, h, 42, 42, 28, 28, true);
+    }
+    return c;
+  };
+  c.on('pointerover', () => { if (c.enabled) bg.setTint(0xffffff); });
+  c.on('pointerout', () => bg.clearTint());
+  c.on('pointerdown', () => {
+    if (!c.enabled) return;
+    unlockAudio();
+    scene.tweens.add({ targets: c, scale: 0.94, duration: 55, yoyo: true });
+    if (opts.onClick) opts.onClick();
+  });
+  c.setEnabled = on => {
+    c.enabled = !!on;
+    c.disableInteractive();
+    if (on) c.setInteractive({ useHandCursor: true });
+    if (c.simple) {
+      const skin = simpleSkin(on ? c.normalFrame : disabledFrame);
+      bg.setFillStyle(skin.fill, opts.bgAlpha ?? 0.92).setStrokeStyle(opts.strokeWidth ?? 1, skin.stroke, 0.9);
+    } else {
+      bg.setTexture('ui_components', on ? c.normalFrame : disabledFrame);
+      bg.setSlices(w, h, 42, 42, 28, 28, true);
+    }
+    if (icon) icon.setAlpha(on ? 1 : 0.45);
+    txt.setAlpha(on ? 1 : 0.55);
+    return c;
+  };
+  return c;
+}
+
 export function makeDifficultySelector(scene, y, selectedKey = DEFAULT_DIFFICULTY, onChange = null, opts = {}) {
   const keys = ['easy', 'normal', 'hard'];
   let current = DIFFICULTIES[selectedKey] ? selectedKey : DEFAULT_DIFFICULTY;
@@ -78,12 +154,12 @@ export function makeDifficultySelector(scene, y, selectedKey = DEFAULT_DIFFICULT
   return { title, buttons, getSelected: () => current };
 }
 
-export function toast(scene, x, y, text, color = '#ffe97a', size = 30) {
+export function toast(scene, x, y, text, color = '#ffe97a', size = 30, duration = 1400) {
   const t = scene.add.text(x, y, text, {
     fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: size + 'px',
     color, fontStyle: 'bold', stroke: '#000000', strokeThickness: 5,
   }).setOrigin(0.5).setDepth(3000);
-  scene.tweens.add({ targets: t, y: y - 70, alpha: 0, duration: 1400, ease: 'Cubic.Out', onComplete: () => t.destroy() });
+  scene.tweens.add({ targets: t, y: y - 70, alpha: 0, duration, ease: 'Cubic.Out', onComplete: () => t.destroy() });
   return t;
 }
 
@@ -198,3 +274,4 @@ export function openShop(scene, save, onClose) {
   refresh();
   return layer;
 }
+import Phaser from 'phaser';

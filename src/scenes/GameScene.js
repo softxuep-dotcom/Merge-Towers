@@ -1,14 +1,15 @@
+import Phaser from 'phaser';
 import {
   W, H, MAX_LV, DEFAULT_DIFFICULTY, DIFFICULTIES, ELEMENTS, ENEMY_TYPES, BASE_HP, LEAK_BOSS, LEAK_NORMAL,
   PHASES, phaseFor, towerPrice, towerBasePrice, waveHp, waveCount, spawnFloor, DIAMOND,
   towerDmg, towerRange,
   MERGE_SURGE, FIRE_BRANCH_BALANCE, ICE_RIVER, ICE_SHATTER, LIGHTNING_HUB, PLAGUE,
   ELITE, TOWER_BRANCHES, BOSS_AFFIXES,
-  NON_BOSS_SPEED_CAP, nonBossSpeedMult,
+  NON_BOSS_SPEED_CAP, nonBossSpeedMult, WAVE_EVENTS,
 } from '../config.js';
 import { Enemy, Path } from '../classes/Enemy.js';
 import { Tower } from '../classes/Tower.js';
-import { makeButton, toast } from '../ui.js';
+import { makeButton, makeHudButton, toast } from '../ui.js';
 import {
   Sfx, setMuted, isMuted, unlockAudio,
   startStageAudio, stopStageAudio, setAudioPhase,
@@ -16,14 +17,14 @@ import {
 import { Poki } from '../poki.js';
 import { writeSave, tier, unlockedElements } from '../save.js';
 import { addTowerImage, fitTowerImageHeight } from '../textures.js';
-import { getLocale, setLocale, t, t as tr } from '../i18n.js';
+import { getLocale, LOCALES, setLocale, t, t as tr } from '../i18n.js';
 import { gameRunAnalysisMethods } from './gameRunAnalysis.js';
 import { gameVfxMethods } from './gameVfx.js';
 
 // 地面路径（行进式像素描迹校准到石板路中轴线，2026-07-09）
 const PATH_PTS = [
-  { x: 118, y: -35 }, { x: 120, y: 40 }, { x: 135, y: 100 }, { x: 153, y: 158 },
-  { x: 168, y: 220 }, { x: 160, y: 275 }, { x: 145, y: 305 }, { x: 172, y: 330 },
+  { x: 118, y: -35 }, { x: 125, y: 40 }, { x: 150, y: 100 }, { x: 170, y: 158 },
+  { x: 178, y: 220 }, { x: 165, y: 275 }, { x: 145, y: 305 }, { x: 172, y: 330 },
   { x: 230, y: 333 }, { x: 315, y: 333 }, { x: 410, y: 333 }, { x: 515, y: 333 },
   { x: 585, y: 338 }, { x: 628, y: 370 }, { x: 646, y: 425 }, { x: 646, y: 500 },
   { x: 644, y: 590 }, { x: 620, y: 640 }, { x: 575, y: 664 }, { x: 480, y: 666 },
@@ -39,8 +40,10 @@ const PATH_PTS = [
 const FLY_PTS = [{ x: 60, y: -30 }, { x: 480, y: 1015 }];
 const SLOT_XS = [159, 260, 362, 464, 565];
 const SLOT_YS = [458, 584];
-const TYPE_ICON = { slime: '🟣', runner: '💨', tank: '🛡️', flyer: '🐝', splitter: '🟠', boss: '💀', mini: '·' };
-const TYPE_CN = { slime: t('enemy.slime'), runner: t('enemy.runner'), tank: t('enemy.tank'), flyer: t('enemy.flyer'), splitter: t('enemy.splitter'), boss: t('enemy.boss'), mini: t('enemy.mini') };
+// 手绘背景两排平台的视觉中心略有不同，分别校准高亮圈。
+const SLOT_RING_Y_OFFSETS = [0, -16];
+const TYPE_ICON = { slime: '🟣', runner: '💨', tank: '🛡️', flyer: '🐝', splitter: '🟠', priest: '🍄', boss: '💀', mini: '·' };
+const TYPE_CN = { slime: t('enemy.slime'), runner: t('enemy.runner'), tank: t('enemy.tank'), flyer: t('enemy.flyer'), splitter: t('enemy.splitter'), priest: t('enemy.priest'), boss: t('enemy.boss'), mini: t('enemy.mini') };
 const ELITE_ICON = { shield: '🛡', haste: '🌀', split: '✹' };
 const BOSS_AFFIX_KEYS = ['resilient', 'armored', 'twin', 'rage'];
 const LANDSCAPE_SIDEBAR_MIN = 360;
@@ -100,6 +103,7 @@ export class GameScene extends Phaser.Scene {
     this.pendingTowerDraft = null;
     this.placementHint = null;
     this.waveState = 'idle'; // prep | active
+    this.waveEvent = null;
     this.spawnLeft = 0;
     this.dying = false;
     this.over = false;
@@ -118,7 +122,6 @@ export class GameScene extends Phaser.Scene {
     this.leakStats = {};
     this.dmgCount = 0;
     this.coinCount = 0;
-    this.lastKillSfx = 0;
     this.firstRunTutorial = (S.tutorialVersion || 0) < 1;
     this.tutorialStep = this.firstRunTutorial ? 'build' : null;
     this.tutorialElem = 'fire';
@@ -185,12 +188,15 @@ export class GameScene extends Phaser.Scene {
     // 塔位（背景图已画好平台 → 只建逻辑格 + 拖拽时的高亮环）
     this.slots = [];
     this.slotRings = [];
-    for (const y of SLOT_YS) for (const x of SLOT_XS) {
-      if (!this.hasBg) this.add.image(x, y, 'slot').setDepth(-10);
-      const ring = this.add.circle(x, y, 46, 0xffe97a, 0).setStrokeStyle(3, 0xffe97a, 0).setDepth(-9);
-      this.slots.push({ x, y, tower: null, ring });
-      this.slotRings.push(ring);
-    }
+    SLOT_YS.forEach((y, row) => {
+      for (const x of SLOT_XS) {
+        if (!this.hasBg) this.add.image(x, y, 'slot').setDepth(-10);
+        const ring = this.add.circle(x, y + SLOT_RING_Y_OFFSETS[row], 46, 0xffe97a, 0)
+          .setStrokeStyle(3, 0xffe97a, 0).setDepth(-9);
+        this.slots.push({ x, y, tower: null, ring });
+        this.slotRings.push(ring);
+      }
+    });
     // 红色警示边缘（漏怪反馈）
     this.vignette = this.add.rectangle(W / 2, H / 2, W, H, 0xff2222, 0).setDepth(2900);
     // 白闪（最高级合成）
@@ -209,74 +215,101 @@ export class GameScene extends Phaser.Scene {
     this.sidebarBg = this.add.rectangle(W / 2, H / 2, 1, 1, 0x161825, 0.94).setDepth(995).setVisible(false);
     this.sidebarDivider = this.add.rectangle(W / 2, H / 2, 2, H, 0x2d3348, 1).setDepth(996).setVisible(false);
 
-    // 顶部状态栏
+    // 朴素状态栏：信息直接落在半透明条上，只用细分隔线组织层级。
     this.topBar = this.add.rectangle(W / 2, 36, W, 72, 0x0b1421, 0.88).setDepth(1000);
-    this.topAccent = this.add.rectangle(W / 2, 71, W, 2, 0x65c9a5, 0.42).setDepth(1001);
-    this.topSep1 = this.add.rectangle(222, 36, 1, 38, 0x9bb2c8, 0.18).setDepth(1001);
-    this.topSep2 = this.add.rectangle(320, 36, 1, 38, 0x9bb2c8, 0.18).setDepth(1001);
-    this.topSep3 = this.add.rectangle(494, 36, 1, 38, 0x9bb2c8, 0.18).setDepth(1001);
-    this.topSep4 = this.add.rectangle(603, 36, 1, 38, 0x9bb2c8, 0.18).setDepth(1001);
-    this.waveText = this.uiText(16, 30, '', 23, '#ffffff').setOrigin(0, 0.5);
-    this.heartText = this.uiText(248, 30, '', 22, '#ff7a7a').setOrigin(0, 0.5);
-    this.coinIcon = this.add.image(332, 30, 'coin').setDepth(1001).setScale(1.2);
-    this.goldText = this.uiText(350, 30, '0', 26, '#ffd34e').setOrigin(0, 0.5);
-    this.diamondIcon = this.add.image(516, 30, 'diamond').setDepth(1001).setScale(0.9);
-    this.diamondText = this.uiText(534, 30, '0', 26, '#9fe8ff').setOrigin(0, 0.5);
-    this.muteBtn = this.uiText(688, 30, isMuted() ? '🔇' : '🔊', 28).setOrigin(0.5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => {
-        const nextMuted = !isMuted();
-        if (!nextMuted) unlockAudio();
-        setMuted(nextMuted);
-        this.S.muted = isMuted(); writeSave(this.S);
-        this.muteBtn.setText(isMuted() ? '🔇' : '🔊');
-        if (!isMuted()) startStageAudio(phaseFor(this.wave));
+    this.topAccent = this.add.rectangle(W / 2, 71, W, 2, 0x65c9a5, 0.34).setDepth(1001);
+    this.topSep1 = this.add.rectangle(166, 36, 1, 34, 0x9bb2c8, 0.16).setDepth(1001);
+    this.topSep2 = this.add.rectangle(258, 36, 1, 34, 0x9bb2c8, 0.16).setDepth(1001);
+    this.topSep3 = this.add.rectangle(412, 36, 1, 34, 0x9bb2c8, 0.16).setDepth(1001);
+    this.topSep4 = this.add.rectangle(548, 36, 1, 34, 0x9bb2c8, 0.16).setDepth(1001);
+    const pill = (x, y, w, h) => this.add.rectangle(x, y, w, h, 0x0b1421, 0).setDepth(1001);
+    this.wavePill = pill(84, 36, 158, 44);
+    this.heartPill = pill(210, 36, 84, 44);
+    this.goldPill = pill(334, 36, 144, 44);
+    this.diamondPill = pill(480, 36, 124, 44);
+    this.waveIcon = this.add.image(24, 36, 'ui_icons', 'wave').setDepth(1002).setDisplaySize(30, 30);
+    this.heartIcon = this.add.image(184, 36, 'ui_icons', 'heart').setDepth(1002).setDisplaySize(28, 28);
+    this.coinIcon = this.add.image(278, 36, 'ui_icons', 'coin').setDepth(1002).setDisplaySize(30, 30);
+    this.diamondIcon = this.add.image(426, 36, 'ui_icons', 'diamond').setDepth(1002).setDisplaySize(28, 28);
+    this.waveText = this.uiText(45, 36, '', 17, '#ffffff').setOrigin(0, 0.5).setDepth(1003);
+    this.heartText = this.uiText(203, 36, '', 20, '#ff9a9a').setOrigin(0, 0.5).setDepth(1003);
+    this.goldText = this.uiText(299, 36, '0', 21, '#ffd66b').setOrigin(0, 0.5).setDepth(1003);
+    this.diamondText = this.uiText(446, 36, '0', 20, '#9fe8ff').setOrigin(0, 0.5).setDepth(1003);
+    const iconButton = (x, frame, onClick) => {
+      const button = this.add.image(x, 36, 'ui_icons', frame)
+        .setDepth(1003).setDisplaySize(32, 32).setInteractive({ useHandCursor: true });
+      button.on('pointerdown', () => {
+        unlockAudio();
+        this.tweens.add({ targets: button, scale: 0.88, duration: 45, yoyo: true });
+        onClick();
       });
-    this.pauseBtn = this.uiText(642, 30, 'Ⅱ', 28, '#ffffff').setOrigin(0.5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.openPause());
-    this.settingsBtn = this.uiText(598, 30, '⚙', 25, '#dce8f2').setOrigin(0.5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.openSettings());
+      return button;
+    };
+    this.settingsBtn = iconButton(590, 'settings', () => this.openSettings());
+    this.pauseBtn = iconButton(635, 'pause', () => this.openPause());
+    this.muteBtn = iconButton(680, 'audio', () => {
+      const nextMuted = !isMuted();
+      if (!nextMuted) unlockAudio();
+      setMuted(nextMuted);
+      this.S.muted = isMuted(); writeSave(this.S);
+      this.refreshHudMute();
+      if (!isMuted()) startStageAudio(phaseFor(this.wave));
+    });
+    this.refreshHudMute();
 
-    // Boss 血条
-    this.bossBarBg = this.add.rectangle(W / 2, 74, 604, 14, 0x000000, 0.6).setDepth(1000).setVisible(false);
-    this.bossBar = this.add.rectangle(W / 2 - 300, 74, 600, 10, 0xe84a5f).setOrigin(0, 0.5).setDepth(1001).setVisible(false);
+    // Boss HUD：保留头像识别，只使用细框与扁平血条。
+    this.bossBarFrame = this.add.rectangle(W / 2, 94, 620, 40, 0x0b1421, 0.8)
+      .setStrokeStyle(1, 0x6d7d91, 0.38).setDepth(1000).setVisible(false);
+    this.bossHudIcon = this.add.image(72, 94, 'ui_icons', 'boss').setDepth(1002).setDisplaySize(36, 36).setVisible(false);
+    this.bossBarBg = this.add.rectangle(102, 94, 520, 12, 0x05080d, 0.92).setOrigin(0, 0.5).setDepth(1001).setVisible(false);
+    this.bossBar = this.add.rectangle(104, 94, 516, 8, 0xc83a57).setOrigin(0, 0.5).setDepth(1002).setVisible(false);
 
     // 下一波预告
-    this.previewBg = this.add.rectangle(W / 2, 108, 330, 44, 0x0b1421, 0.66).setStrokeStyle(1, 0x7892aa, 0.18).setDepth(999);
-    this.previewText = this.uiText(W / 2, 108, '', 21, '#d7e2ed').setOrigin(0.5);
+    this.previewBg = this.add.rectangle(W / 2, 104, 430, 48, 0x0b1421, 0.7)
+      .setStrokeStyle(1, 0x7892aa, 0.22).setDepth(999).setVisible(false);
+    this.previewText = this.uiText(W / 2, 104, '', 18, '#d7e2ed').setOrigin(0.5).setAlign('center');
 
     // 底部面板（背景图模式半透明，露出城堡）
-    this.bottomPanel = this.add.rectangle(W / 2, 1155, W, 250, 0x0b1421, this.hasBg ? 0.82 : 0.94).setDepth(1000);
-    this.bottomAccent = this.add.rectangle(W / 2, 1031, W, 2, 0x65c9a5, 0.35).setDepth(1001);
+    this.bottomPanel = this.add.rectangle(W / 2, 1197, W, 166, 0x0b1421, this.hasBg ? 0.84 : 0.94).setDepth(1000);
+    this.bottomAccent = this.add.rectangle(W / 2, 1114, W, 2, 0x65c9a5, 0.35).setDepth(1001);
 
     // 提前召唤
-    this.callBtn = makeButton(this, W / 2, 1012, 370, 52, t('game.call'), {
-      bg: 0x594b2b, stroke: 0xb89a50, fontSize: 20,
+    this.callBtn = makeHudButton(this, W / 2, 1012, 370, 58, t('game.call'), {
+      simple: true, frame: 'button_primary', icon: 'play', iconSize: 30, fontSize: 18,
       onClick: () => this.startWave(true),
     }).setDepth(1002).setVisible(false);
 
     // 买塔（核心按钮）
-    this.buyBtn = makeButton(this, 350, 1170, 326, 112, '', {
-      bg: 0x24624f, stroke: 0x58bd91, fontSize: 29,
+    this.buyBtn = makeHudButton(this, 350, 1170, 326, 112, '', {
+      simple: true, frame: 'button_primary', icon: 'build', iconSize: 48, iconX: -104, labelX: 30, fontSize: 25,
       onClick: () => this.buyTower(),
     }).setDepth(1002);
+    this.buyPriceText = this.add.text(108, 0, '', {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '29px',
+      color: '#ffe47a', fontStyle: 'bold', stroke: '#142033', strokeThickness: 3,
+    }).setOrigin(0.5);
+    this.buyBtn.add(this.buyPriceText);
 
     // 回收区
     this.sellRect = new Phaser.Geom.Rectangle(18, 1114, 142, 112);
-    this.sellZone = this.add.rectangle(89, 1170, 142, 112, 0x3e2932, 0.92).setStrokeStyle(2, 0x81505d).setDepth(1001);
-    this.sellText = this.uiText(89, 1170, t('game.sell'), 20, '#e99aa8').setOrigin(0.5).setDepth(1002);
+    this.sellSkin = this.add.rectangle(89, 1170, 142, 112, 0x3d2932, 0.92)
+      .setStrokeStyle(1, 0x76505e, 0.9).setDepth(1001);
+    this.sellZone = this.add.rectangle(89, 1170, 142, 112, 0xffffff, 0.001).setDepth(1003);
+    this.sellIcon = this.add.image(89, 1148, 'ui_icons', 'recycle').setDepth(1002).setDisplaySize(38, 38);
+    this.sellText = this.uiText(89, 1190, t('game.sell'), 18, '#ffe8ec').setOrigin(0.5).setDepth(1002);
     this.sellZone.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-      toast(this, W / 2, this.sellZone.y - 90, t('game.sellHint'), '#ffd7df', 18);
+      toast(this, W / 2, this.sellZone.y - 90, t('game.sellHint'), '#ffd7df', 18, 2800);
     });
 
     // 广告送塔
-    this.giftBtn = makeButton(this, 625, 1138, 158, 52, '', {
-      bg: 0x4b365d, stroke: 0x8868a2, fontSize: 16,
+    this.giftBtn = makeHudButton(this, 625, 1138, 158, 58, '', {
+      simple: true, frame: 'button_secondary', icon: 'gift', iconSize: 30, iconX: -50, labelX: 18, fontSize: 14,
       onClick: () => this.adGiftTower(),
     }).setDepth(1002);
 
     // 2 倍速（局外解锁后显示）
-    this.speedBtn = makeButton(this, 625, 1202, 158, 52, '', {
-      bg: 0x2d3a55, stroke: 0x53698f, fontSize: 20,
+    this.speedBtn = makeHudButton(this, 625, 1202, 158, 58, '', {
+      simple: true, frame: 'button_secondary', icon: 'speed2x', iconSize: 30, iconX: -50, labelX: 18, fontSize: 18,
       onClick: () => this.toggleSpeed(),
     }).setDepth(1002);
     this.updateSpeedButton();
@@ -345,9 +378,10 @@ export class GameScene extends Phaser.Scene {
 
   applyPortraitUI() {
     const bottom = this.layout.viewH;
-    const panelY = bottom - 125;
-    const callY = bottom - 270;
-    const actionY = bottom - 110;
+    const panelH = 166;
+    const panelY = bottom - panelH / 2;
+    const callY = bottom - 198;
+    const actionY = bottom - 74;
 
     this.sidebarBg.setVisible(false);
     this.sidebarDivider.setVisible(false);
@@ -357,36 +391,57 @@ export class GameScene extends Phaser.Scene {
 
     this.setUiRect(this.topBar, W / 2, 36, W, 72);
     this.setUiRect(this.topAccent, W / 2, 71, W, 2);
-    this.setUiRect(this.topSep1, 222, 36, 1, 38);
-    this.setUiRect(this.topSep2, 320, 36, 1, 38);
-    this.setUiRect(this.topSep3, 494, 36, 1, 38);
-    this.setUiRect(this.topSep4, 603, 36, 1, 38);
-    this.setUi(this.waveText, 16, 30).setOrigin(0, 0.5);
-    this.setUi(this.heartText, 248, 30).setOrigin(0, 0.5);
-    this.setUi(this.coinIcon, 332, 30).setScale(1.2);
-    this.setUi(this.goldText, 350, 30).setOrigin(0, 0.5);
-    this.setUi(this.diamondIcon, 516, 30).setScale(0.9);
-    this.setUi(this.diamondText, 534, 30).setOrigin(0, 0.5);
-    this.setUi(this.muteBtn, 688, 30).setOrigin(0.5);
-    this.setUi(this.pauseBtn, 642, 30).setOrigin(0.5);
-    this.setUi(this.settingsBtn, 598, 30).setOrigin(0.5);
+    this.setUiRect(this.topSep1, 166, 36, 1, 34);
+    this.setUiRect(this.topSep2, 258, 36, 1, 34);
+    this.setUiRect(this.topSep3, 412, 36, 1, 34);
+    this.setUiRect(this.topSep4, 548, 36, 1, 34);
+    this.setUiRect(this.wavePill, 84, 36, 158, 44);
+    this.setUiRect(this.heartPill, 210, 36, 84, 44);
+    this.setUiRect(this.goldPill, 334, 36, 144, 44);
+    this.setUiRect(this.diamondPill, 480, 36, 124, 44);
+    this.setUi(this.waveIcon, 24, 36).setDisplaySize(30, 30);
+    this.setUi(this.heartIcon, 184, 36).setDisplaySize(28, 28);
+    this.setUi(this.coinIcon, 278, 36).setDisplaySize(30, 30);
+    this.setUi(this.diamondIcon, 426, 36).setDisplaySize(28, 28);
+    this.setUi(this.waveText, 45, 36).setOrigin(0, 0.5);
+    this.setUi(this.heartText, 203, 36).setOrigin(0, 0.5);
+    this.setUi(this.goldText, 299, 36).setOrigin(0, 0.5);
+    this.setUi(this.diamondText, 446, 36).setOrigin(0, 0.5);
+    this.waveText.setFontSize(17);
+    this.heartText.setFontSize(21);
+    this.goldText.setFontSize(22);
+    this.diamondText.setFontSize(20);
+    this.setUi(this.settingsBtn, 590, 36).setDisplaySize(32, 32);
+    this.setUi(this.pauseBtn, 635, 36).setDisplaySize(32, 32);
+    this.setUi(this.muteBtn, 680, 36).setDisplaySize(32, 32);
 
-    this.bossBarMaxWidth = 600;
-    this.setUiRect(this.bossBarBg, W / 2, 74, 604, 14);
-    this.bossBar.setPosition(this.layout.x(W / 2 - 300), 74);
-    this.bossBar.height = 10;
-    this.setUiRect(this.previewBg, W / 2, 108, 330, 44);
-    this.setUi(this.previewText, W / 2, 108).setOrigin(0.5);
+    this.bossBarMaxWidth = 516;
+    this.setUiRect(this.bossBarFrame, W / 2, 94, 620, 40);
+    this.setUi(this.bossHudIcon, 72, 94).setDisplaySize(36, 36);
+    this.setUiRect(this.bossBarBg, 102, 94, 520, 12);
+    this.bossBar.setPosition(this.layout.x(104), 94);
+    this.bossBar.height = 8;
+    this.setUiRect(this.previewBg, W / 2, 104, 430, 48);
+    this.setUi(this.previewText, W / 2, 104).setOrigin(0.5).setFontSize(18);
 
-    this.setUiRect(this.bottomPanel, W / 2, panelY, W, 250);
-    this.setUiRect(this.bottomAccent, W / 2, bottom - 249, W, 2);
+    this.setUiRect(this.bottomPanel, W / 2, panelY, W, panelH);
+    this.setUiRect(this.bottomAccent, W / 2, bottom - panelH + 1, W, 2);
     this.setUi(this.callBtn, W / 2, callY);
-    this.setUi(this.buyBtn, 350, actionY);
-    this.sellRect = new Phaser.Geom.Rectangle(18, bottom - 166, 142, 112);
-    this.setUiRect(this.sellZone, 89, actionY, 142, 112);
-    this.setUi(this.sellText, 89, actionY).setOrigin(0.5);
-    this.setUi(this.giftBtn, 625, bottom - 142);
-    this.setUi(this.speedBtn, 625, bottom - 78);
+    this.setUi(this.buyBtn, 350, actionY).setScale(0.76);
+    this.sellRect = new Phaser.Geom.Rectangle(24, actionY - 40, 104, 80);
+    this.setUiRect(this.sellZone, 76, actionY, 104, 80);
+    this.setUiRect(this.sellSkin, 76, actionY, 104, 80);
+    this.setUi(this.sellIcon, 76, actionY - 15).setDisplaySize(38, 38);
+    this.sellIconBaseScaleX = this.sellIcon.scaleX;
+    this.sellIconBaseScaleY = this.sellIcon.scaleY;
+    this.setUi(this.sellText, 76, actionY + 16).setOrigin(0.5).setFontSize(15);
+    this.setUi(this.giftBtn, 625, bottom - 106).setScale(0.8);
+    this.setUi(this.speedBtn, 625, bottom - 48).setScale(0.8);
+    this.buyBtn.label.setFontSize(24);
+    this.buyPriceText.setFontSize(25);
+    this.callBtn.label.setFontSize(18);
+    this.giftBtn.label.setFontSize(14);
+    this.speedBtn.label.setFontSize(18);
   }
 
   applyLandscapeUI() {
@@ -402,39 +457,60 @@ export class GameScene extends Phaser.Scene {
     this.setUiRect(this.sidebarBg, sideCenter, viewH / 2, sidebarW, viewH);
     this.setUiRect(this.sidebarDivider, fieldAreaW, viewH / 2, 2, viewH);
 
-    this.setUiRect(this.topBar, sideCenter, 70, sidebarW - 34, 120);
-    this.setUiRect(this.topAccent, sideCenter, 130, sidebarW - 34, 2);
-    this.setUi(this.waveText, sideLeft + 12, 42).setOrigin(0, 0.5);
-    this.setUi(this.heartText, sideLeft + 12, 96).setOrigin(0, 0.5);
-    this.setUi(this.coinIcon, sideLeft + 110, 96).setScale(1.05);
-    this.setUi(this.goldText, sideLeft + 134, 96).setOrigin(0, 0.5);
-    this.setUi(this.diamondIcon, sideLeft + 236, 96).setScale(0.8);
-    this.setUi(this.diamondText, sideLeft + 257, 96).setOrigin(0, 0.5);
-    this.setUi(this.muteBtn, sideRight - 20, 42).setOrigin(0.5);
-    this.setUi(this.pauseBtn, sideRight - 68, 42).setOrigin(0.5);
-    this.setUi(this.settingsBtn, sideRight - 116, 42).setOrigin(0.5);
-    this.setUiRect(this.topSep1, sideLeft + 94, 96, 1, 28);
-    this.setUiRect(this.topSep2, sideLeft + 220, 96, 1, 28);
+    this.setUiRect(this.topBar, sideCenter, 68, sidebarW - 28, 124);
+    this.setUiRect(this.topAccent, sideCenter, 130, sidebarW - 44, 2);
+    this.setUiRect(this.wavePill, sideLeft + 66, 40, 132, 50);
+    this.setUiRect(this.heartPill, sideLeft + 40, 101, 80, 48);
+    this.setUiRect(this.goldPill, sideLeft + 142, 101, 116, 48);
+    this.setUiRect(this.diamondPill, sideLeft + 270, 101, 120, 48);
+    this.setUi(this.waveIcon, sideLeft + 20, 40).setDisplaySize(30, 30);
+    this.setUi(this.heartIcon, sideLeft + 16, 101).setDisplaySize(28, 28);
+    this.setUi(this.coinIcon, sideLeft + 102, 101).setDisplaySize(30, 30);
+    this.setUi(this.diamondIcon, sideLeft + 228, 101).setDisplaySize(28, 28);
+    this.setUi(this.waveText, sideLeft + 45, 40).setOrigin(0, 0.5);
+    this.setUi(this.heartText, sideLeft + 39, 101).setOrigin(0, 0.5);
+    this.setUi(this.goldText, sideLeft + 127, 101).setOrigin(0, 0.5);
+    this.setUi(this.diamondText, sideLeft + 253, 101).setOrigin(0, 0.5);
+    this.waveText.setFontSize(21);
+    this.heartText.setFontSize(23);
+    this.goldText.setFontSize(23);
+    this.diamondText.setFontSize(21);
+    this.setUi(this.muteBtn, sideRight - 18, 40);
+    this.setUi(this.pauseBtn, sideRight - 60, 40);
+    this.setUi(this.settingsBtn, sideRight - 102, 40);
+    this.topSep1.setVisible(false);
+    this.topSep2.setVisible(false);
     this.topSep3.setVisible(false);
     this.topSep4.setVisible(false);
 
-    this.bossBarMaxWidth = sidebarW - 74;
-    this.setUiRect(this.bossBarBg, sideCenter, 146, this.bossBarMaxWidth + 4, 14);
-    this.bossBar.setPosition(this.layout.x(sideCenter - this.bossBarMaxWidth / 2), 146);
-    this.bossBar.height = 10;
-    this.setUiRect(this.previewBg, sideCenter, 178, sidebarW - 50, 42);
-    this.setUi(this.previewText, sideCenter, 178).setOrigin(0.5);
+    this.bossBarMaxWidth = sidebarW - 116;
+    this.setUiRect(this.bossBarFrame, sideCenter, 158, sidebarW - 34, 40);
+    this.setUi(this.bossHudIcon, sideLeft + 28, 158).setDisplaySize(36, 36);
+    this.setUiRect(this.bossBarBg, sideLeft + 58, 158, this.bossBarMaxWidth + 4, 12);
+    this.bossBar.setPosition(this.layout.x(sideLeft + 60), 158);
+    this.bossBar.height = 8;
+    this.setUiRect(this.previewBg, sideCenter, 190, sidebarW - 44, 52);
+    this.setUi(this.previewText, sideCenter, 188).setOrigin(0.5).setFontSize(20);
 
-    this.setUi(this.callBtn, sideCenter, 238);
-    this.setUi(this.buyBtn, sideCenter, 338);
+    this.setUi(this.callBtn, sideCenter, 248);
+    this.setUi(this.buyBtn, sideCenter, 348).setScale(1);
 
     const sellX = sideCenter;
-    const sellY = 458;
+    const sellY = 468;
     this.sellRect = new Phaser.Geom.Rectangle(this.layout.x(sellX - 71), sellY - 56, 142, 112);
     this.setUiRect(this.sellZone, sellX, sellY, 142, 112);
-    this.setUi(this.sellText, sellX, sellY).setOrigin(0.5);
-    this.setUi(this.giftBtn, sideCenter, 548);
-    this.setUi(this.speedBtn, sideCenter, 614);
+    this.setUiRect(this.sellSkin, sellX, sellY, 142, 112);
+    this.setUi(this.sellIcon, sellX, sellY - 22).setDisplaySize(50, 50);
+    this.sellIconBaseScaleX = this.sellIcon.scaleX;
+    this.sellIconBaseScaleY = this.sellIcon.scaleY;
+    this.setUi(this.sellText, sellX, sellY + 20).setOrigin(0.5).setFontSize(18);
+    this.setUi(this.giftBtn, sideCenter, 558).setScale(1);
+    this.setUi(this.speedBtn, sideCenter, 624).setScale(1);
+    this.buyBtn.label.setFontSize(28);
+    this.buyPriceText.setFontSize(29);
+    this.callBtn.label.setFontSize(19);
+    this.giftBtn.label.setFontSize(19);
+    this.speedBtn.label.setFontSize(20);
   }
 
   uiText(x, y, str, size = 24, color = '#ffffff') {
@@ -442,6 +518,13 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: size + 'px',
       color, fontStyle: 'bold',
     }).setDepth(1001);
+  }
+
+  refreshHudMute() {
+    if (!this.muteBtn) return;
+    this.muteBtn.setAlpha(isMuted() ? 0.46 : 1);
+    if (isMuted()) this.muteBtn.setTint(0x8f99a8);
+    else this.muteBtn.clearTint();
   }
 
   installAudioLifecycle() {
@@ -459,8 +542,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   updateUI() {
-    this.waveText.setText(t('game.wave', { wave: this.wave, difficulty: DIFFICULTIES[this.difficulty].cn }));
-    this.heartText.setText(`❤ ${Math.max(0, this.baseHp)}`);
+    this.waveText.setText(`${this.wave} · ${DIFFICULTIES[this.difficulty].cn}`);
+    this.heartText.setText(String(Math.max(0, this.baseHp)));
     if (this.goldRollTween && this.gold < this.displayGold) {
       this.goldRollTween.stop();
       this.goldRollTween = null;
@@ -469,13 +552,16 @@ export class GameScene extends Phaser.Scene {
     this.goldText.setText(String(Math.floor(this.displayGold)));
     this.diamondText.setText(String(this.S.diamonds + this.diamondsRun));
     const cost = towerPrice(this.wave, this.waveBought);
+    const isBuilding = !this.pendingTowerDraft && !this.towerChoiceLayer;
     if (this.pendingTowerDraft) this.buyBtn.label.setText(t('game.place'));
     else if (this.towerChoiceLayer) this.buyBtn.label.setText(t('game.choose'));
-    else this.buyBtn.label.setText(t('game.build', { cost }));
+    else this.buyBtn.label.setText(t('game.build', { cost }).split('\n')[0]);
+    this.buyBtn.label.setX(isBuilding ? 10 : 38);
+    this.buyPriceText.setText(String(cost)).setVisible(isBuilding);
     const afford = !this.pendingTowerDraft && !this.towerChoiceLayer && this.gold >= cost && this.slots.some(s => !s.tower);
-    this.buyBtn.bg.setFillStyle(afford ? 0x2e6b4f : 0x33384a);
+    this.buyBtn.setSkin(afford ? 'button_primary' : 'button_disabled');
     const giftLeft = BONUS_TOWER_LIMIT - this.adGifts;
-    this.giftBtn.label.setText(giftLeft > 0 ? t('game.gift', { left: giftLeft }) : t('game.giftDone'));
+    this.giftBtn.label.setText(`${Math.max(0, giftLeft)}/${BONUS_TOWER_LIMIT}`);
     this.giftBtn.setEnabled(giftLeft > 0);
     if (this.firstRunTutorial) {
       this.giftBtn.setEnabled(false);
@@ -591,8 +677,9 @@ export class GameScene extends Phaser.Scene {
     if (w >= ENEMY_TYPES.tank.from) pool.push(['tank', 20]);
     if (w >= ENEMY_TYPES.flyer.from) pool.push(['flyer', 18]);
     if (w >= ENEMY_TYPES.splitter.from) pool.push(['splitter', 16]);
+    if (w >= ENEMY_TYPES.priest.from) pool.push(['priest', 12]);
     const total = pool.reduce((s, p) => s + p[1], 0);
-    const n = waveCount(w);
+    const n = Math.ceil(waveCount(w) * (this.waveEvent?.countMult || 1));
     for (let i = 0; i < n; i++) {
       let r = Math.random() * total;
       for (const [k, wgt] of pool) { r -= wgt; if (r <= 0) { list.push(k); break; } }
@@ -653,13 +740,26 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
+  pickWaveEvent(w) {
+    if (w < WAVE_EVENTS.fromWave || w % 5 === 0 || Math.random() >= WAVE_EVENTS.chance) return null;
+    const keys = ['swarm', 'armored', 'haste'];
+    return WAVE_EVENTS[Phaser.Utils.Array.GetRandom(keys)];
+  }
+
   startPrep() {
     if (this.over || this.dying) return;
     this.waveState = 'prep';
+    this.waveEvent = this.pickWaveEvent(this.wave);
     this.pending = this.composeWave(this.wave);
     // 预告图标（去重）
     const icons = this.previewIcons(this.pending);
-    this.previewText.setText(t('game.next', { icons }));
+    const eventKey = this.waveEvent ? `waveEvent.${this.waveEvent.key}` : 'waveEvent.normal';
+    this.previewText.setText(t('game.nextInfo', {
+      wave: this.wave,
+      count: this.pending.length,
+      icons,
+      event: t(eventKey),
+    }));
     this.previewBg.setVisible(true);
     this.callBtn.setVisible(true);
     this.prepTimer = this.time.delayedCall(4000, () => this.startWave(false));
@@ -727,6 +827,12 @@ export class GameScene extends Phaser.Scene {
     const path = t.flying ? this.flyPath : this.path;
     const spawnOpts = { ...opts, difficulty: this.difficulty };
     if (!t.boss) {
+      const event = this.waveEvent;
+      if (event) {
+        spawnOpts.hpMult = (spawnOpts.hpMult || 1) * (event.hpMult || 1);
+        spawnOpts.armorBonus = (spawnOpts.armorBonus || 0) + (event.armorBonus || 0);
+        spawnOpts.speedMult = (spawnOpts.speedMult || 1) * (event.speedMult || 1);
+      }
       spawnOpts.speedMult = (spawnOpts.speedMult || 1) * nonBossSpeedMult(this.wave);
       spawnOpts.speedCap = NON_BOSS_SPEED_CAP;
     }
@@ -756,7 +862,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  endWave() {
+  async endWave() {
     this.waveState = 'idle';
     this.resonanceGoldMult = 1;
     this.waveBought = 0; // 波内价格热度重置
@@ -803,6 +909,8 @@ export class GameScene extends Phaser.Scene {
       }
     }
     this.updateUI();
+    if ([20, 30, 40].includes(finished)) await Poki.commercialBreak();
+    if (this.over || this.dying) return;
     this.startPrep();
   }
 
@@ -852,9 +960,6 @@ export class GameScene extends Phaser.Scene {
     this.rollGoldTo(this.gold);
     this.burst(e.x, e.y, e.type.color, e.boss ? 40 : 12, e.boss ? 1.6 : 1);
     this.coinFly(e.x, e.y, g);
-    const now = this.time.now;
-    if (now - this.lastKillSfx > 90) { Sfx.kill(); this.lastKillSfx = now; }
-
     if (e.boss) {
       const rewardDiamonds = DIAMOND.boss;
       this.diamondsRun += rewardDiamonds;
@@ -1322,10 +1427,39 @@ export class GameScene extends Phaser.Scene {
       bg: 0x2e755b, stroke: 0x65d6a0, fontSize: 30, onClick: () => this.closePause(),
     }));
     layer.add(makeButton(this, cx, cy + 110, 360, 70, t('game.home'), {
-      bg: 0x35445e, stroke: 0x667b9b, fontSize: 25, onClick: () => {
-        this.time.timeScale = 1; this.tweens.timeScale = 1; this.scene.start('Menu');
+      bg: 0x35445e, stroke: 0x667b9b, fontSize: 25, onClick: () => this.openExitConfirm(),
+    }));
+  }
+
+  openExitConfirm() {
+    if (this.exitConfirmLayer) return;
+    const cx = this.layout.x(this.layout.viewW / 2), cy = this.layout.viewH / 2;
+    const layer = this.add.container(0, 0).setDepth(7300);
+    this.exitConfirmLayer = layer;
+    layer.add(this.add.rectangle(cx, cy, this.layout.viewW, this.layout.viewH, 0x03050a, 0.72).setInteractive());
+    layer.add(this.add.rectangle(cx, cy, 540, 380, 0x172033, 0.99).setStrokeStyle(3, 0xe06b70));
+    layer.add(this.add.text(cx, cy - 125, t('game.exitTitle'), {
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '36px', color: '#ffb0b0',
+    }).setOrigin(0.5));
+    layer.add(this.add.text(cx, cy - 45, t('game.exitWarning'), {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '22px', color: '#e7edf5',
+      align: 'center', lineSpacing: 10,
+    }).setOrigin(0.5));
+    layer.add(makeButton(this, cx - 125, cy + 105, 220, 66, t('game.exitCancel'), {
+      bg: 0x35445e, stroke: 0x7183a0, fontSize: 23, onClick: () => this.closeExitConfirm(),
+    }));
+    layer.add(makeButton(this, cx + 125, cy + 105, 220, 66, t('game.exitConfirm'), {
+      bg: 0x783942, stroke: 0xe06b70, fontSize: 21, onClick: () => {
+        this.time.timeScale = 1;
+        this.tweens.timeScale = 1;
+        this.scene.start('Menu');
       },
     }));
+  }
+
+  closeExitConfirm() {
+    if (this.exitConfirmLayer) this.exitConfirmLayer.destroy();
+    this.exitConfirmLayer = null;
   }
 
   closePause() {
@@ -1363,11 +1497,28 @@ export class GameScene extends Phaser.Scene {
     const layer = this.add.container(0, 0).setDepth(7100);
     this.settingsLayer = layer;
     layer.add(this.add.rectangle(x, y, width, height, 0x050912, 0.82).setInteractive());
-    layer.add(this.add.rectangle(x, y, 540, 600, 0x111d2e, 0.98).setStrokeStyle(2, 0x6585a2, 0.8));
-    layer.add(this.add.text(x, y - 238, t('settings.title'), {
+    layer.add(this.add.rectangle(x, y, 620, 720, 0x111d2e, 0.98).setStrokeStyle(2, 0x6585a2, 0.8));
+    // 提审/真机测试入口：设置卡片左上角 2 秒内连点 7 次触发一次插屏。
+    let secretAdTaps = 0;
+    let secretAdDeadline = 0;
+    let secretAdRunning = false;
+    const secretAdHotspot = this.add.rectangle(x - 275, y - 315, 70, 70, 0x000000, 0.001).setInteractive();
+    secretAdHotspot.on('pointerdown', async () => {
+      const now = Date.now();
+      if (now > secretAdDeadline) secretAdTaps = 0;
+      secretAdDeadline = now + 2000;
+      secretAdTaps++;
+      if (secretAdTaps < 7 || secretAdRunning) return;
+      secretAdTaps = 0;
+      secretAdRunning = true;
+      try { await Poki.commercialBreak(); }
+      finally { secretAdRunning = false; }
+    });
+    layer.add(secretAdHotspot);
+    layer.add(this.add.text(x, y - 310, t('settings.title'), {
       fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '42px', color: '#f5e9a7',
     }).setOrigin(0.5));
-    layer.add(this.add.text(x, y - 152, t('settings.language'), {
+    layer.add(this.add.text(x, y - 250, t('settings.language'), {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '21px', color: '#8fa5bb', fontStyle: 'bold',
     }).setOrigin(0.5));
 
@@ -1379,30 +1530,28 @@ export class GameScene extends Phaser.Scene {
       this.tweens.timeScale = 1;
       window.location.reload();
     };
-    layer.add(makeButton(this, x - 128, y - 92, 230, 68, 'ENGLISH', {
-      bg: current === 'en' ? 0x24624f : 0x2b374a,
-      stroke: current === 'en' ? 0x65d6a0 : 0x53677f,
-      fontSize: 23,
-      onClick: () => chooseLanguage('en'),
-    }));
-    layer.add(makeButton(this, x + 128, y - 92, 230, 68, '中文', {
-      bg: current === 'zh' ? 0x24624f : 0x2b374a,
-      stroke: current === 'zh' ? 0x65d6a0 : 0x53677f,
-      fontSize: 23,
-      onClick: () => chooseLanguage('zh'),
-    }));
-    layer.add(this.add.text(x, y - 37, t('settings.restart'), {
+    LOCALES.forEach((locale, index) => {
+      const col = index % 3;
+      const row = Math.floor(index / 3);
+      layer.add(makeButton(this, x + (col - 1) * 190, y - 195 + row * 58, 176, 48, locale.label, {
+        bg: current === locale.code ? 0x24624f : 0x2b374a,
+        stroke: current === locale.code ? 0x65d6a0 : 0x53677f,
+        fontSize: locale.label.length > 14 ? 14 : 17,
+        onClick: () => chooseLanguage(locale.code),
+      }));
+    });
+    layer.add(this.add.text(x, y + 42, t('settings.restart'), {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '16px', color: '#65798e',
     }).setOrigin(0.5));
 
-    layer.add(makeButton(this, x, y + 72, 486, 94, t('settings.help'), {
+    layer.add(makeButton(this, x, y + 120, 486, 76, t('settings.help'), {
       bg: 0x273f59, stroke: 0x5f8bb0, fontSize: 29,
       onClick: () => this.showTowerCodex(),
     }));
-    layer.add(this.add.text(x, y + 132, t('settings.helpDesc'), {
+    layer.add(this.add.text(x, y + 168, t('settings.helpDesc'), {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '16px', color: '#7890a8',
     }).setOrigin(0.5));
-    layer.add(makeButton(this, x, y + 225, 320, 66, t('common.close'), {
+    layer.add(makeButton(this, x, y + 265, 320, 60, t('common.close'), {
       bg: 0x3a4558, stroke: 0x65748b, fontSize: 24,
       onClick: () => this.closeSettings(),
     }));
@@ -1463,6 +1612,15 @@ export class GameScene extends Phaser.Scene {
       }).setOrigin(0, 0.5);
       layer.add([row, icon, name, base, pathA4, pathA7, pathB4, pathB7]);
     });
+
+    const eliteTitle = this.add.text(x - 294, 1108, t('codex.elite.title'), {
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '16px', color: '#7fe7e0',
+    });
+    const eliteHaste = this.add.text(x - 294, 1134, t('codex.elite.haste'), {
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '13px', color: '#b8cbd8',
+      wordWrap: { width: 588 },
+    });
+    layer.add([eliteTitle, eliteHaste]);
   }
 
   closeSettings() {
@@ -2287,7 +2445,7 @@ export class GameScene extends Phaser.Scene {
 
   updateSpeedButton() {
     if (!this.speedBtn) return;
-    this.speedBtn.label.setText(this.runSpeedUnlocked ? `▶ x${this.speedMult}` : '📺 x2');
+    this.speedBtn.label.setText(this.runSpeedUnlocked ? `x${this.speedMult}` : 'x2');
   }
 
   async toggleSpeed() {
@@ -2325,7 +2483,9 @@ export class GameScene extends Phaser.Scene {
       t.setDraggingVisual(true);
       obj.setDepth(2600);
       this.rangeCircle.setPosition(t.slot.x, t.slot.y).setRadius(t.range).setVisible(true);
-      this.sellZone.setStrokeStyle(3, 0xff6b7d).setScale(1.06);
+      this.sellZone.setScale(1.06);
+      this.sellSkin.setTint(0xffa4b2).setScale(1.06);
+      this.sellIcon.setScale(this.sellIconBaseScaleX * 1.06, this.sellIconBaseScaleY * 1.06);
       this.showFreeSlots(true);
       // 高亮可合成目标
       for (const o of this.towers) {
@@ -2349,7 +2509,9 @@ export class GameScene extends Phaser.Scene {
       t.dragging = false;
       t.setDraggingVisual(false);
       this.rangeCircle.setVisible(false);
-      this.sellZone.setStrokeStyle(2, 0x9c4a58).setScale(1);
+      this.sellZone.setScale(1);
+      this.sellSkin.clearTint().setScale(1);
+      this.sellIcon.setScale(this.sellIconBaseScaleX, this.sellIconBaseScaleY);
       this.showFreeSlots(false);
       for (const o of this.towers) o.setHighlight(false);
 
@@ -2369,7 +2531,12 @@ export class GameScene extends Phaser.Scene {
       } else if (nearest.tower.elem === t.elem && nearest.tower.lv === t.lv && t.lv < MAX_LV) {
         this.doMerge(t, nearest.tower);
       } else {
-        t.moveTo(t.slot);
+        const source = t.slot;
+        const other = nearest.tower;
+        source.tower = other;
+        nearest.tower = t;
+        other.moveTo(source);
+        t.moveTo(nearest);
       }
     });
   }
@@ -2393,11 +2560,45 @@ export class GameScene extends Phaser.Scene {
 
   eliteSpeedFactorFor(enemy) {
     if (enemy.dead) return 1;
+    const cellSize = ELITE.hasteCellSize;
+    const enemyCol = Math.floor(enemy.x / cellSize);
+    const enemyRow = Math.floor(enemy.y / cellSize);
     for (const e of this.enemies) {
-      if (e === enemy || e.dead || e.eliteAffix !== 'haste') continue;
-      if (Phaser.Math.Distance.Between(e.x, e.y, enemy.x, enemy.y) <= ELITE.auraRadius) return ELITE.auraSpeedMult;
+      if (e.dead || e.eliteAffix !== 'haste') continue;
+      const hasteCol = Math.floor(e.x / cellSize);
+      const hasteRow = Math.floor(e.y / cellSize);
+      if (Math.abs(hasteCol - enemyCol) <= 1 && Math.abs(hasteRow - enemyRow) <= 1) {
+        return ELITE.auraSpeedMult;
+      }
     }
     return 1;
+  }
+
+  updateEnemySupport(dts) {
+    for (const priest of this.enemies) {
+      if (priest.dead || !priest.type.healer) continue;
+      priest.supportHealCooldown = (priest.supportHealCooldown ?? 1.5) - dts;
+      if (priest.supportHealCooldown > 0) continue;
+      priest.supportHealCooldown = 3;
+
+      let target = null;
+      let lowestRatio = 1;
+      for (const enemy of this.enemies) {
+        if (enemy.dead || enemy.hp >= enemy.maxHp) continue;
+        if (Phaser.Math.Distance.Between(priest.x, priest.y, enemy.x, enemy.y) > 170) continue;
+        const ratio = enemy.hp / enemy.maxHp;
+        if (ratio < lowestRatio) { lowestRatio = ratio; target = enemy; }
+      }
+      if (!target) continue;
+
+      const healed = Math.min(target.maxHp - target.hp, target.maxHp * 0.08);
+      target.hp += healed;
+      target.barBg.setVisible(true);
+      target.bar.setVisible(true);
+      target.bar.width = (target.healthBarWidth || (target.boss ? 80 : 42)) * (target.hp / target.maxHp);
+      this.burst(priest.x, priest.y - 18, 0x42d9c7, 7, 0.55);
+      this.showDmg(target.x, target.y - 42, `+${Math.ceil(healed)}`, '#72f0cb');
+    }
   }
 
   sourceBonusFor(t) {
@@ -2513,7 +2714,9 @@ export class GameScene extends Phaser.Scene {
 
     // 弹道类：火 / 冰 / 毒
     const isFireProjectile = elem === 'fire';
-    const b = this.add.image(sx, sy, isFireProjectile ? 'fire_orb' : 'bullet').setDepth(2050);
+    const isIceProjectile = elem === 'ice';
+    const projectileTexture = isFireProjectile ? 'fire_orb' : (isIceProjectile ? 'ice_bolt' : 'bullet');
+    const b = this.add.image(sx, sy, projectileTexture).setDepth(2050);
     if (isFireProjectile) {
       const heading = Phaser.Math.Angle.Between(sx, sy, target.x, target.y - 10);
       const headingDeg = Phaser.Math.RadToDeg(heading);
@@ -2532,6 +2735,26 @@ export class GameScene extends Phaser.Scene {
         blendMode: Phaser.BlendModes.ADD,
       }).setDepth(2049);
       b.setData('fireTrail', trail);
+    } else if (isIceProjectile) {
+      const heading = Phaser.Math.Angle.Between(sx, sy, target.x, target.y - 10);
+      const headingDeg = Phaser.Math.RadToDeg(heading);
+      b
+        .setRotation(heading)
+        .setScale((0.78 + Math.min(lv, 7) * 0.025) * (branch === 'a' ? 1.08 : 1))
+        .setBlendMode(Phaser.BlendModes.ADD);
+      const trail = this.add.particles(0, 0, 'ice_speck', {
+        follow: b,
+        frequency: branch === 'b' ? 24 : 32,
+        lifespan: { min: 180, max: 320 },
+        angle: { min: headingDeg + 155, max: headingDeg + 205 },
+        speed: { min: 16, max: 48 },
+        rotate: { min: -120, max: 120 },
+        scale: { start: branch === 'b' ? 0.72 : 0.58, end: 0.08 },
+        alpha: { start: 0.82, end: 0 },
+        tint: [0x7cddff, 0xd9f8ff, 0xffffff],
+        blendMode: Phaser.BlendModes.ADD,
+      }).setDepth(2049);
+      b.setData('iceTrail', trail);
     } else {
       b.setTint(color).setScale(0.9);
     }
@@ -2544,6 +2767,11 @@ export class GameScene extends Phaser.Scene {
         if (fireTrail) {
           fireTrail.stop();
           this.time.delayedCall(340, () => fireTrail.destroy());
+        }
+        const iceTrail = b.getData('iceTrail');
+        if (iceTrail) {
+          iceTrail.stop();
+          this.time.delayedCall(340, () => iceTrail.destroy());
         }
         b.destroy();
         if (this.over) return;
@@ -2579,6 +2807,19 @@ export class GameScene extends Phaser.Scene {
             });
           }
         } else if (elem === 'ice') {
+          const impact = this.add.particles(ix, iy, 'ice_speck', {
+            emitting: false,
+            lifespan: { min: 180, max: 360 },
+            speed: { min: 45, max: 125 },
+            angle: { min: 0, max: 360 },
+            rotate: { min: -180, max: 180 },
+            scale: { start: branch === 'b' ? 0.95 : 0.75, end: 0 },
+            alpha: { start: 1, end: 0 },
+            tint: [0x62d1ff, 0xc7f3ff, 0xffffff],
+            blendMode: Phaser.BlendModes.ADD,
+          }).setDepth(2052);
+          impact.explode(branch === 'b' ? 9 : 6);
+          this.time.delayedCall(420, () => impact.destroy());
           if (!target.dead) {
             const slowCap = 80;
             if (branch === 'a') {
@@ -2807,7 +3048,11 @@ export class GameScene extends Phaser.Scene {
     S.lastSeen = Date.now();
     writeSave(S);
     Sfx.gameOver();
-    await Poki.commercialBreak();
+    // 广告 SDK 偶尔不会回调，不能因此永久卡住死亡结算。
+    await Promise.race([
+      Poki.commercialBreak(),
+      new Promise(resolve => window.setTimeout(resolve, 4000)),
+    ]);
     this.scene.start('Result', {
       wave: this.wave, kills: this.kills, dRun: this.diamondsRun, newBest, deathBonus, diagnosis, waveDps,
       difficulty: this.difficulty,
@@ -2832,6 +3077,7 @@ export class GameScene extends Phaser.Scene {
 
     // 敌人
     for (const e of [...this.enemies]) e.update(dts);
+    this.updateEnemySupport(dts);
 
     // 光 Lv7 攻速 buff
     if (this.atkBuffT > 0) this.atkBuffT -= dts;
@@ -2893,9 +3139,13 @@ export class GameScene extends Phaser.Scene {
       const ratio = bosses.reduce((s, b) => s + Math.max(0, b.hp), 0) / bosses.reduce((s, b) => s + b.maxHp, 0);
       this.bossBarBg.setVisible(true);
       this.bossBar.setVisible(true).width = (this.bossBarMaxWidth || 600) * ratio;
+      this.bossBarFrame.setVisible(true);
+      this.bossHudIcon.setVisible(true);
     } else {
       this.bossBarBg.setVisible(false);
       this.bossBar.setVisible(false);
+      this.bossBarFrame.setVisible(false);
+      this.bossHudIcon.setVisible(false);
     }
   }
 }

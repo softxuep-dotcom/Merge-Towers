@@ -1,5 +1,18 @@
 const STORAGE_KEY = 'mt_locale';
-const SUPPORTED = ['en', 'zh'];
+export const LOCALES = [
+  { code: 'en', label: 'English', short: 'EN' },
+  { code: 'fr', label: 'Français', short: 'FR' },
+  { code: 'it', label: 'Italiano', short: 'IT' },
+  { code: 'de', label: 'Deutsch', short: 'DE' },
+  { code: 'es', label: 'Español', short: 'ES' },
+  { code: 'tr', label: 'Türkçe', short: 'TR' },
+  { code: 'zh-CN', label: '简体中文', short: '简中' },
+  { code: 'ja', label: '日本語', short: 'JA' },
+  { code: 'ko', label: '한국어', short: 'KO' },
+  { code: 'pt-BR', label: 'Português (Brasil)', short: 'PT' },
+  { code: 'ru', label: 'Русский', short: 'RU' },
+];
+const SUPPORTED = LOCALES.map(locale => locale.code);
 
 const EN = {
   'language.label': '中文',
@@ -7,7 +20,7 @@ const EN = {
   'element.fire': 'FIRE', 'element.frost': 'FROST', 'element.storm': 'STORM', 'element.venom': 'VENOM', 'element.light': 'LIGHT',
   'element.splash': 'SPLASH', 'element.slow': 'SLOW', 'element.chain': 'CHAIN', 'element.toxin': 'TOXIN', 'element.execute': 'EXECUTE',
   'enemy.slime': 'SLIME', 'enemy.runner': 'RUNNER', 'enemy.tank': 'TANK', 'enemy.flyer': 'FLYER',
-  'enemy.splitter': 'SPLITTER', 'enemy.boss': 'BOSS', 'enemy.mini': 'MINION',
+  'enemy.splitter': 'SPLITTER', 'enemy.priest': 'SPORE PRIEST', 'enemy.boss': 'BOSS', 'enemy.mini': 'MINION',
   'phase.day': 'DAYBREAK', 'phase.dusk': 'DUSK', 'phase.night': 'NIGHTFALL', 'phase.blood': 'BLOOD MOON',
   'branch.fireA': 'BLAST', 'branch.fireB': 'CORE', 'branch.iceA': 'GLACIER', 'branch.iceB': 'SHATTER',
   'branch.stormA': 'TEMPEST', 'branch.stormB': 'NEXUS', 'branch.venomA': 'PLAGUE', 'branch.venomB': 'CORROSION',
@@ -52,8 +65,15 @@ const EN = {
   'game.wave': 'WAVE {wave} · {difficulty}', 'game.build': 'BUILD\n💰 {cost}', 'game.place': 'PLACE\nTOWER',
   'game.choose': 'CHOOSE\n...', 'game.gift': 'BONUS TOWER\n{left} LEFT', 'game.giftDone': 'BONUS USED',
   'game.call': 'CALL WAVE EARLY  ·  +10% GOLD', 'game.sell': 'SELL\n50%', 'game.next': 'NEXT ▶ {icons}',
+  'game.nextInfo': 'WAVE {wave} · {count} ENEMIES · {icons}\n{event}',
+  'waveEvent.normal': 'NORMAL WAVE',
+  'waveEvent.swarm': '🐜 SWARM · +35% enemies · −25% HP',
+  'waveEvent.armored': '🛡 HEAVY ARMOR · +20% armor',
+  'waveEvent.haste': '💨 HASTE · +25% speed · −10% HP',
   'game.pauseTitle': 'GAME PAUSED', 'game.pauseDesc': 'Take a breath. The line will hold.',
   'game.resume': '▶ RESUME', 'game.home': '⌂ MAIN MENU', 'game.full': 'TOWER SLOTS FULL — MERGE FIRST!',
+  'game.exitTitle': 'LEAVE THIS RUN?', 'game.exitWarning': 'Returning to the main menu will restart the game.\nYour current run will be lost.',
+  'game.exitCancel': 'CANCEL', 'game.exitConfirm': 'RETURN TO MAIN MENU',
   'game.pickTower': 'CHOOSE 1 OF {count}  ·  Lv{level}  ·  💰{cost}', 'game.cancel': 'CANCEL',
   'game.placeHint': 'Choose an empty slot for {element} Lv{level}', 'game.milestone': '⭐ POWER MILESTONE!',
   'game.mergeHint': '👆 DRAG MATCHING TOWERS TO MERGE!', 'game.interest': 'INTEREST +{value}💰',
@@ -102,6 +122,8 @@ const EN = {
   'codex.light.a7': 'Lv7 A ↑ Execute grants ALL towers +50% rate for 3s',
   'codex.light.b4': 'Lv4 B · {name}: Nearby towers +20% DMG (R170); non-Boss execute heals 1 HP',
   'codex.light.b7': 'Lv7 B ↑ Aura +20% → +30%; non-Boss execute heals 2 HP (cap 3/wave)',
+  'codex.elite.title': 'ELITE AFFIX · 🌀 HASTE AURA',
+  'codex.elite.haste': 'The elite and allies in its 8 neighboring grid cells gain +30% speed (3×3 cells total).',
   'result.newBest': '🏆 NEW RECORD!', 'result.over': '⚔ RUN COMPLETE', 'result.wave': 'HELD UNTIL WAVE {wave}',
   'result.kills': 'Enemies defeated: {value}', 'result.best': 'Best run: Wave {value}',
   'result.difficulty': 'Difficulty: {value}', 'result.build': 'Build: {value}',
@@ -127,7 +149,7 @@ const ZH = {
   'element.fire': '火', 'element.frost': '冰', 'element.storm': '电', 'element.venom': '毒', 'element.light': '光',
   'element.splash': '溅射', 'element.slow': '减速', 'element.chain': '连锁', 'element.toxin': '剧毒', 'element.execute': '斩杀',
   'enemy.slime': '小兵', 'enemy.runner': '疾行者', 'enemy.tank': '铁盾兵', 'enemy.flyer': '飞行兵',
-  'enemy.splitter': '分裂怪', 'enemy.boss': 'Boss', 'enemy.mini': '小怪',
+  'enemy.splitter': '分裂怪', 'enemy.priest': '孢子祭司', 'enemy.boss': 'Boss', 'enemy.mini': '小怪',
   'phase.day': '白天', 'phase.dusk': '黄昏', 'phase.night': '夜晚', 'phase.blood': '血月',
   'branch.fireA': '爆裂', 'branch.fireB': '熔核', 'branch.iceA': '冰河', 'branch.iceB': '碎冰',
   'branch.stormA': '风暴', 'branch.stormB': '雷枢', 'branch.venomA': '瘟疫', 'branch.venomB': '腐蚀',
@@ -170,8 +192,15 @@ const ZH = {
   'game.wave': '第 {wave} 波 · {difficulty}', 'game.build': '造 塔\n💰 {cost}', 'game.place': '点空位\n放 塔',
   'game.choose': '选元素\n...', 'game.gift': '高级塔\n剩 {left} 次', 'game.giftDone': '奖励已用完',
   'game.call': '提前召唤  ·  +10%金币', 'game.sell': '回收\n50%', 'game.next': '下一波 ▶ {icons}',
+  'game.nextInfo': '第{wave}波 · {count}名敌人 · {icons}\n{event}',
+  'waveEvent.normal': '普通波次',
+  'waveEvent.swarm': '🐜 虫群 · 敌人+35% · 生命−25%',
+  'waveEvent.armored': '🛡 重甲 · 护甲+20%',
+  'waveEvent.haste': '💨 疾行 · 速度+25% · 生命−10%',
   'game.pauseTitle': '游戏已暂停', 'game.pauseDesc': '调整好节奏，再继续守卫基地',
   'game.resume': '▶ 继续游戏', 'game.home': '⌂ 返回首页', 'game.full': '塔位已满，先合成!',
+  'game.exitTitle': '确定返回主界面？', 'game.exitWarning': '返回后游戏将重新开始，\n当前这局的进度会全部丢失。',
+  'game.exitCancel': '取消', 'game.exitConfirm': '确认返回',
   'game.pickTower': '选择新塔（{count}选1）  Lv{level}  💰{cost}', 'game.cancel': '取消',
   'game.placeHint': '点一个空塔位放置 {element} Lv{level}', 'game.milestone': '⭐ 里程碑质变!',
   'game.mergeHint': '👆 拖动合成同色塔！', 'game.interest': '利息 +{value}💰',
@@ -220,6 +249,8 @@ const ZH = {
   'codex.light.a7': 'Lv7 A ↑ 处决后全场塔攻速 +50%，持续3秒',
   'codex.light.b4': 'Lv4 B · {name}：附近塔伤害 +20%（半径170）；处决非 Boss 回复1点生命',
   'codex.light.b7': 'Lv7 B ↑ 光环 20% → 30%；处决非 Boss 回复2点生命（每波最多3点）',
+  'codex.elite.title': '精英词缀 · 🌀 加速光环',
+  'codex.elite.haste': '精英自身及其所在格周围的 8 个格子内，所有友军移动速度 +30%（共 3×3 九宫格）。',
   'result.newBest': '🏆 新纪录!', 'result.over': '⚔ 战斗结束', 'result.wave': '坚守到第 {wave} 波',
   'result.kills': '击杀敌人：{value}', 'result.best': '历史最高：第 {value} 波',
   'result.difficulty': '本局难度：{value}', 'result.build': '阵容：{value}',
@@ -239,17 +270,49 @@ const ZH = {
   'analysis.none': '无塔', 'analysis.sold': '（已出售）',
 };
 
-const DICTS = { en: EN, zh: ZH };
+const CORE = {
+  fr: { 'settings.title': 'PARAMÈTRES', 'settings.language': 'LANGUE', 'settings.help': 'GUIDE DES TOURS', 'settings.restart': 'Changer de langue redémarre le jeu', 'common.close': 'FERMER', 'menu.start': 'COMMENCER', 'menu.workshop': 'ATELIER', 'menu.best': 'MEILLEURE PARTIE', 'menu.resources': 'RESSOURCES', 'difficulty.easy': 'FACILE', 'difficulty.normal': 'NORMAL', 'difficulty.hard': 'DIFFICILE', 'game.pauseTitle': 'JEU EN PAUSE', 'game.resume': 'REPRENDRE', 'game.home': 'MENU PRINCIPAL', 'result.retry': 'REJOUER', 'result.menu': 'MENU PRINCIPAL' },
+  it: { 'settings.title': 'IMPOSTAZIONI', 'settings.language': 'LINGUA', 'settings.help': 'GUIDA DELLE TORRI', 'settings.restart': 'Il cambio di lingua riavvia il gioco', 'common.close': 'CHIUDI', 'menu.start': 'INIZIA PARTITA', 'menu.workshop': 'OFFICINA', 'menu.best': 'MIGLIOR PARTITA', 'menu.resources': 'RISORSE', 'difficulty.easy': 'FACILE', 'difficulty.normal': 'NORMALE', 'difficulty.hard': 'DIFFICILE', 'game.pauseTitle': 'GIOCO IN PAUSA', 'game.resume': 'RIPRENDI', 'game.home': 'MENU PRINCIPALE', 'result.retry': 'RIPROVA', 'result.menu': 'MENU PRINCIPALE' },
+  de: { 'settings.title': 'EINSTELLUNGEN', 'settings.language': 'SPRACHE', 'settings.help': 'TURM-HANDBUCH', 'settings.restart': 'Ein Sprachwechsel startet das Spiel neu', 'common.close': 'SCHLIESSEN', 'menu.start': 'SPIEL STARTEN', 'menu.workshop': 'WERKSTATT', 'menu.best': 'BESTER LAUF', 'menu.resources': 'RESSOURCEN', 'difficulty.easy': 'EINFACH', 'difficulty.normal': 'NORMAL', 'difficulty.hard': 'SCHWER', 'game.pauseTitle': 'SPIEL PAUSIERT', 'game.resume': 'FORTSETZEN', 'game.home': 'HAUPTMENÜ', 'result.retry': 'NOCH EINMAL', 'result.menu': 'HAUPTMENÜ' },
+  es: { 'settings.title': 'AJUSTES', 'settings.language': 'IDIOMA', 'settings.help': 'GUÍA DE TORRES', 'settings.restart': 'Cambiar el idioma reinicia el juego', 'common.close': 'CERRAR', 'menu.start': 'INICIAR PARTIDA', 'menu.workshop': 'TALLER', 'menu.best': 'MEJOR PARTIDA', 'menu.resources': 'RECURSOS', 'difficulty.easy': 'FÁCIL', 'difficulty.normal': 'NORMAL', 'difficulty.hard': 'DIFÍCIL', 'game.pauseTitle': 'JUEGO EN PAUSA', 'game.resume': 'CONTINUAR', 'game.home': 'MENÚ PRINCIPAL', 'result.retry': 'REINTENTAR', 'result.menu': 'MENÚ PRINCIPAL' },
+  tr: { 'settings.title': 'AYARLAR', 'settings.language': 'DİL', 'settings.help': 'KULE REHBERİ', 'settings.restart': 'Dil değişikliği oyunu yeniden başlatır', 'common.close': 'KAPAT', 'menu.start': 'OYUNU BAŞLAT', 'menu.workshop': 'ATÖLYE', 'menu.best': 'EN İYİ OYUN', 'menu.resources': 'KAYNAKLAR', 'difficulty.easy': 'KOLAY', 'difficulty.normal': 'NORMAL', 'difficulty.hard': 'ZOR', 'game.pauseTitle': 'OYUN DURAKLATILDI', 'game.resume': 'DEVAM ET', 'game.home': 'ANA MENÜ', 'result.retry': 'TEKRAR DENE', 'result.menu': 'ANA MENÜ' },
+  ja: { 'settings.title': '設定', 'settings.language': '言語', 'settings.help': 'タワーガイド', 'settings.restart': '言語を変更するとゲームが再起動します', 'common.close': '閉じる', 'menu.start': 'ゲーム開始', 'menu.workshop': '工房', 'menu.best': 'ベスト記録', 'menu.resources': '資源', 'difficulty.easy': 'かんたん', 'difficulty.normal': 'ふつう', 'difficulty.hard': 'むずかしい', 'game.pauseTitle': '一時停止', 'game.resume': '再開', 'game.home': 'メインメニュー', 'result.retry': 'もう一度', 'result.menu': 'メインメニュー' },
+  ko: { 'settings.title': '설정', 'settings.language': '언어', 'settings.help': '타워 가이드', 'settings.restart': '언어를 변경하면 게임이 다시 시작됩니다', 'common.close': '닫기', 'menu.start': '게임 시작', 'menu.workshop': '작업장', 'menu.best': '최고 기록', 'menu.resources': '자원', 'difficulty.easy': '쉬움', 'difficulty.normal': '보통', 'difficulty.hard': '어려움', 'game.pauseTitle': '일시 정지', 'game.resume': '계속하기', 'game.home': '메인 메뉴', 'result.retry': '다시 하기', 'result.menu': '메인 메뉴' },
+  'pt-BR': { 'settings.title': 'CONFIGURAÇÕES', 'settings.language': 'IDIOMA', 'settings.help': 'GUIA DE TORRES', 'settings.restart': 'Mudar o idioma reinicia o jogo', 'common.close': 'FECHAR', 'menu.start': 'INICIAR PARTIDA', 'menu.workshop': 'OFICINA', 'menu.best': 'MELHOR PARTIDA', 'menu.resources': 'RECURSOS', 'difficulty.easy': 'FÁCIL', 'difficulty.normal': 'NORMAL', 'difficulty.hard': 'DIFÍCIL', 'game.pauseTitle': 'JOGO PAUSADO', 'game.resume': 'CONTINUAR', 'game.home': 'MENU PRINCIPAL', 'result.retry': 'JOGAR NOVAMENTE', 'result.menu': 'MENU PRINCIPAL' },
+  ru: { 'settings.title': 'НАСТРОЙКИ', 'settings.language': 'ЯЗЫК', 'settings.help': 'СПРАВОЧНИК БАШЕН', 'settings.restart': 'Смена языка перезапустит игру', 'common.close': 'ЗАКРЫТЬ', 'menu.start': 'НАЧАТЬ ИГРУ', 'menu.workshop': 'МАСТЕРСКАЯ', 'menu.best': 'ЛУЧШИЙ РЕЗУЛЬТАТ', 'menu.resources': 'РЕСУРСЫ', 'difficulty.easy': 'ЛЕГКО', 'difficulty.normal': 'НОРМАЛЬНО', 'difficulty.hard': 'СЛОЖНО', 'game.pauseTitle': 'ПАУЗА', 'game.resume': 'ПРОДОЛЖИТЬ', 'game.home': 'ГЛАВНОЕ МЕНЮ', 'result.retry': 'ЕЩЁ РАЗ', 'result.menu': 'ГЛАВНОЕ МЕНЮ' },
+};
+const DICTS = { en: EN, 'zh-CN': ZH, ...CORE };
+
+function browserLocale() {
+  const languages = typeof navigator !== 'undefined' ? (navigator.languages || [navigator.language]) : [];
+  for (const language of languages) {
+    const normalized = String(language || '').replace('_', '-');
+    if (/^zh\b/i.test(normalized)) return 'zh-CN';
+    if (/^pt\b/i.test(normalized)) return 'pt-BR';
+    const match = SUPPORTED.find(code => code.toLowerCase() === normalized.toLowerCase() || normalized.toLowerCase().startsWith(`${code.toLowerCase()}-`));
+    if (match) return match;
+  }
+  return 'en';
+}
 
 export function getLocale() {
-  try { return SUPPORTED.includes(localStorage.getItem(STORAGE_KEY)) ? localStorage.getItem(STORAGE_KEY) : 'en'; }
-  catch (_) { return 'en'; }
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const locale = saved === 'zh' ? 'zh-CN' : (SUPPORTED.includes(saved) ? saved : browserLocale());
+    if (typeof document !== 'undefined') document.documentElement.lang = locale;
+    return locale;
+  } catch (_) { return browserLocale(); }
 }
 
 export function setLocale(locale) {
   const next = SUPPORTED.includes(locale) ? locale : 'en';
   try { localStorage.setItem(STORAGE_KEY, next); } catch (_) {}
+  if (typeof document !== 'undefined') document.documentElement.lang = next;
   return next;
+}
+
+export function getLocaleInfo(code = getLocale()) {
+  return LOCALES.find(locale => locale.code === code) || LOCALES[0];
 }
 
 export function t(key, vars = {}) {

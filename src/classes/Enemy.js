@@ -1,3 +1,4 @@
+import Phaser from 'phaser';
 import { ENEMY_TYPES, ELITE, waveHp, BOSS_AFFIXES, BOSS_CONTROL } from '../config.js';
 import { t } from '../i18n.js';
 import {
@@ -86,13 +87,6 @@ export class Enemy {
     const p = path.pointAt(this.progress);
     const spriteY = this.flying ? -30 : 0;
     this.shadow = scene.add.image(0, 6, 'shadow');
-    if (this.boss) {
-      // Boss 贴图较高，但脚下接触面并不宽。旧版等比放大到 1.8 倍后，
-      // 阴影会变成一块 86×36 的黑斑，并在侧身行走时明显拖在身体后方。
-      this.shadow.setScale(1.38, 0.68).setAlpha(0.56);
-    } else {
-      this.shadow.setScale(0.8 * (this.elite ? 1.25 : 1));
-    }
     this.paintedKey = paintedEnemyKey(typeKey);
     this.paintedAtlasKey = paintedEnemyTextureKey(scene, this.paintedKey);
     this.usesPaintedSprite = !!this.paintedAtlasKey && !!paintedEnemyAnimationSource(scene, this.paintedKey, 'left');
@@ -106,13 +100,43 @@ export class Enemy {
     } else {
       this.spr = scene.add.image(0, spriteY, 'enemy_' + typeKey);
     }
-    this.shadow.y = this.flying
-      ? 8
-      : spriteY + Math.max(14, this.spr.displayHeight * (this.boss ? 0.47 : 0.38));
-    const bw = this.boss ? 72 : 42;
-    this.barBg = scene.add.rectangle(0, spriteY - this.type.size - 16, bw, 6, 0x000000, 0.55).setVisible(false);
-    this.bar = scene.add.rectangle(0, spriteY - this.type.size - 16, bw, 6, 0x8bf05a).setVisible(false);
-    const children = [this.shadow, this.spr, this.barBg, this.bar];
+
+    const shadowWidth = this.spr.displayWidth * (this.boss ? 0.68 : this.flying ? 0.5 : 0.64);
+    const shadowHeight = this.boss ? 18 : this.flying ? 9 : Phaser.Math.Clamp(this.spr.displayHeight * 0.14, 8, 14);
+    this.shadow
+      .setDisplaySize(shadowWidth, shadowHeight)
+      .setAlpha(this.boss ? 0.5 : this.flying ? 0.24 : 0.4)
+      .setPosition(0, this.flying ? 9 : spriteY + this.spr.displayHeight * (this.boss ? 0.47 : 0.4));
+
+    // A dark duplicate behind the frame gives every enemy one consistent outline.
+    this.outlineSpr = scene.add.image(
+      this.spr.x,
+      this.spr.y,
+      this.spr.texture.key,
+      this.spr.frame.name,
+    );
+    const outlineScale = this.boss ? 1.075 : 1.09;
+    this.outlineSpr
+      .setScale(this.spr.scaleX * outlineScale, this.spr.scaleY * outlineScale)
+      .setTint(0x190f22)
+      .setTintMode(Phaser.TintModes.FILL)
+      .setAlpha(this.boss ? 0.88 : 0.82);
+
+    this.corruptionGlow = this.boss
+      ? scene.add.image(0, spriteY, 'glow')
+        .setTint(0x8f38dc)
+        .setAlpha(0.42)
+        .setDisplaySize(this.spr.displayWidth * 1.06, this.spr.displayHeight * 0.84)
+      : null;
+
+    this.healthBarWidth = this.boss ? 80 : 42;
+    const healthBarY = spriteY - Math.max(this.type.size, this.spr.displayHeight * 0.38) - 16;
+    this.barBg = scene.add.rectangle(0, healthBarY, this.healthBarWidth, 6, 0x000000, 0.55).setVisible(false);
+    this.bar = scene.add.rectangle(0, healthBarY, this.healthBarWidth, 6, 0x8bf05a).setVisible(false);
+    const children = [this.shadow];
+    if (this.corruptionGlow) children.push(this.corruptionGlow);
+    children.push(this.outlineSpr, this.spr);
+    children.push(this.barBg, this.bar);
     if (this.elite) {
       const affix = ELITE.affixes[this.eliteAffix];
       this.eliteHalo = scene.add.image(0, spriteY, 'glow').setTint(affix.color).setAlpha(0.55).setScale(1.35);
@@ -139,6 +163,7 @@ export class Enemy {
       children.push(this.bossAffixIcon);
     }
     this.c = scene.add.container(p.x, p.y, children);
+    this.syncEnemyVisuals();
     this.c.setDepth(p.y + (this.flying ? 220 : 0));
     // 入场弹跳
     this.c.setScale(0.3);
@@ -245,7 +270,7 @@ export class Enemy {
     this.hp -= real;
     if (this.scene.recordTowerDamage) this.scene.recordTowerDamage(sourceTower, applied);
     this.barBg.setVisible(true); this.bar.setVisible(true);
-    this.bar.width = Math.max(0, (this.boss ? 72 : 42) * (this.hp / this.maxHp));
+    this.bar.width = Math.max(0, this.healthBarWidth * (this.hp / this.maxHp));
     // 受击闪白（Phaser 4：setTintFill 已移除，改用 TintModes.FILL）
     this.spr.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
     this.scene.time.delayedCall(45, () => { if (!this.dead) this.restoreTint(); });
@@ -261,7 +286,7 @@ export class Enemy {
     if (healed > 0) {
       this.barBg.setVisible(true);
       this.bar.setVisible(true);
-      this.bar.width = Math.max(0, (this.boss ? 72 : 42) * (this.hp / this.maxHp));
+      this.bar.width = Math.max(0, this.healthBarWidth * (this.hp / this.maxHp));
     }
     return healed;
   }
@@ -305,7 +330,7 @@ export class Enemy {
       this.hp -= real;
       if (this.scene.recordTowerDamage) this.scene.recordTowerDamage(p.sourceTower, applied);
       this.barBg.setVisible(true); this.bar.setVisible(true);
-      this.bar.width = Math.max(0, (this.boss ? 72 : 42) * (this.hp / this.maxHp));
+      this.bar.width = Math.max(0, this.healthBarWidth * (this.hp / this.maxHp));
       if (this.hp <= 0) { poisonDied = true; break; }
     }
     if (poisonDied) {
@@ -324,12 +349,12 @@ export class Enemy {
     if (this.frozenT > 0) {
       this.frozenT -= dts;
       if (this.frozenT <= 0) this.restoreTint();
-      else return; // 冻结不移动
+      else { this.syncEnemyVisuals(); return; } // 冻结不移动
     }
     if (this.stunnedT > 0) {
       this.stunnedT -= dts;
       if (this.stunnedT <= 0) this.restoreTint();
-      else return; // 眩晕不移动
+      else { this.syncEnemyVisuals(); return; } // 眩晕不移动
     }
     let speedFactor = 1;
     if (this.slowT > 0) {
@@ -355,8 +380,9 @@ export class Enemy {
       this.bobPhase += dts * 6;
       this.spr.y = -30 + Math.sin(this.bobPhase) * 5;
     }
+    this.syncEnemyVisuals();
     if (this.hp < this.maxHp) {
-      this.bar.width = Math.max(0, (this.boss ? 72 : 42) * (this.hp / this.maxHp));
+      this.bar.width = Math.max(0, this.healthBarWidth * (this.hp / this.maxHp));
     }
   }
 
@@ -366,8 +392,11 @@ export class Enemy {
 
   setFacingByDelta(dx, dy) {
     if (!this.usesPaintedSprite || (Math.abs(dx) < 0.25 && Math.abs(dy) < 0.25)) return;
-    const direction = paintedEnemyPlaybackDirection(dx, dy);
+    let direction = paintedEnemyPlaybackDirection(dx, dy);
     if (!direction) return;
+    // Boss direction must read clearly on the road: reserve the front strip for
+    // predominantly downward travel and keep horizontal travel on the true side strip.
+    if (this.boss && dy > 0 && Math.abs(dy) >= Math.abs(dx) * 1.15) direction = 'front';
     const sourceDirection = paintedEnemyAnimationSource(this.scene, this.paintedKey, direction);
     if (!sourceDirection) return;
     const animKey = paintedEnemyAnimKey(this.paintedKey, sourceDirection);
@@ -387,5 +416,15 @@ export class Enemy {
               : 0;
       this.shadow.setPosition(footOffsetX, this.spr.displayHeight * 0.47);
     }
+    this.syncEnemyVisuals();
+  }
+
+  syncEnemyVisuals() {
+    if (!this.spr) return;
+    if (this.outlineSpr) {
+      if (this.outlineSpr.frame?.name !== this.spr.frame?.name) this.outlineSpr.setFrame(this.spr.frame.name);
+      this.outlineSpr.setPosition(this.spr.x, this.spr.y).setFlipX(this.spr.flipX);
+    }
+    if (this.corruptionGlow) this.corruptionGlow.setPosition(this.spr.x, this.spr.y);
   }
 }

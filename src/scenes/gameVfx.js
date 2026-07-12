@@ -842,3 +842,4 @@ class GameVfx {
 
 const { constructor, ...gameVfxMethods } = Object.getOwnPropertyDescriptors(GameVfx.prototype);
 export { gameVfxMethods };
+import Phaser from 'phaser';

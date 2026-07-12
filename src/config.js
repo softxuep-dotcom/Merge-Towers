@@ -126,7 +126,8 @@ export const ELITE = {
   hpMult: 3,
   sizeMult: 1.3,
   goldMult: 2,
-  auraRadius: 120,
+  // 加速光环按地图格判定：自身格 + 周围 8 格（3x3 九宫格）。
+  hasteCellSize: 100,
   auraSpeedMult: 1.3,
   shieldHits: 3,
   affixes: {
@@ -159,6 +160,15 @@ export function nonBossSpeedMult(w) {
   return 1;
 }
 
+// 轻量波次事件：只在普通波出现，提前在准备阶段公开。
+export const WAVE_EVENTS = {
+  fromWave: 3,
+  chance: 0.35,
+  swarm: { key: 'swarm', countMult: 1.35, hpMult: 0.75 },
+  armored: { key: 'armored', armorBonus: 0.2 },
+  haste: { key: 'haste', speedMult: 1.25, hpMult: 0.9 },
+};
+
 // 波次数值（GDD §4.3）：HP 增速波 22 后压平 1.19→1.155，拉开不同强度玩家的墓碑差距
 export function waveHp(w, difficulty = DEFAULT_DIFFICULTY) {
   const hpBase = DIFFICULTIES[difficulty]?.hpBase ?? DIFFICULTIES[DEFAULT_DIFFICULTY].hpBase;
@@ -190,6 +200,7 @@ export const ENEMY_TYPES = {
   tank:     { hpMult: 3.3,  speed: 64,  goldMult: 2.5, color: 0x9aa17d, size: 28, armor: 0.2, from: 6 },
   flyer:    { hpMult: 0.9,  speed: 96,  goldMult: 1.2, color: 0x8c57d9, size: 22, flying: true, from: 9 },
   splitter: { hpMult: 1.35, speed: 90,  goldMult: 1.5, color: 0xd6c453, size: 26, splits: true, from: 11 },
+  priest:   { hpMult: 1.15, speed: 78,  goldMult: 1.7, color: 0x42d9c7, size: 25, healer: true, from: 13 },
   mini:     { hpMult: 0.35, speed: 115, goldMult: 0.3, color: 0x87d64a, size: 15, from: 99 },
   boss:     { hpMult: 15,   speed: 48,  goldMult: 14,  color: 0x748255, size: 44, boss: true, from: 5 },
 };

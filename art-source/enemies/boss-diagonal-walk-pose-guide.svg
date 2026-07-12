@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="360" viewBox="0 0 1500 360">
+  <rect width="1500" height="360" fill="#151821"/>
+  <g stroke="#3c4253" stroke-width="3">
+    <path d="M300 0V360M600 0V360M900 0V360M1200 0V360"/>
+  </g>
+  <g font-family="Arial" font-size="24" font-weight="700" fill="#fff" text-anchor="middle">
+    <text x="150" y="32">1 LEFT CONTACT</text><text x="450" y="32">2 DOWN</text>
+    <text x="750" y="32">3 PASS</text><text x="1050" y="32">4 RIGHT CONTACT</text>
+    <text x="1350" y="32">5 PUSH / UP</text>
+  </g>
+  <!-- Cyan = left-side limbs, yellow = right-side limbs. All torsos share one anchor. -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Frame 1: cyan/left foot reaches strongly down-left; yellow/right arm forward. -->
+    <g transform="translate(150 82)">
+      <circle cx="0" cy="35" r="25" stroke="#fff" stroke-width="14"/>
+      <path d="M0 70L0 170" stroke="#fff" stroke-width="36"/>
+      <path d="M-18 95L-78 155" stroke="#00d9ff" stroke-width="24"/>
+      <path d="M18 95L62 188" stroke="#ffd43b" stroke-width="24"/>
+      <path d="M-12 166L-78 248L-122 270" stroke="#00d9ff" stroke-width="30"/>
+      <path d="M12 166L38 224L75 220" stroke="#ffd43b" stroke-width="30"/>
+    </g>
+    <!-- Frame 2: planted compression, both knees bent, torso lower. -->
+    <g transform="translate(450 96)">
+      <circle cx="0" cy="35" r="25" stroke="#fff" stroke-width="14"/>
+      <path d="M0 70L0 165" stroke="#fff" stroke-width="36"/>
+      <path d="M-18 98L-52 174" stroke="#00d9ff" stroke-width="24"/>
+      <path d="M18 98L45 172" stroke="#ffd43b" stroke-width="24"/>
+      <path d="M-12 160L-52 220L-92 244" stroke="#00d9ff" stroke-width="30"/>
+      <path d="M12 160L50 208L78 235" stroke="#ffd43b" stroke-width="30"/>
+    </g>
+    <!-- Frame 3: yellow/right knee passes across center, cyan leg planted. -->
+    <g transform="translate(750 82)">
+      <circle cx="0" cy="35" r="25" stroke="#fff" stroke-width="14"/>
+      <path d="M0 70L0 170" stroke="#fff" stroke-width="36"/>
+      <path d="M-18 96L-35 185" stroke="#00d9ff" stroke-width="24"/>
+      <path d="M18 96L-44 158" stroke="#ffd43b" stroke-width="24"/>
+      <path d="M-12 166L-42 245L-58 270" stroke="#00d9ff" stroke-width="30"/>
+      <path d="M12 166L56 198L18 238" stroke="#ffd43b" stroke-width="30"/>
+    </g>
+    <!-- Frame 4: yellow/right foot reaches strongly down-left; cyan/left arm forward. -->
+    <g transform="translate(1050 82)">
+      <circle cx="0" cy="35" r="25" stroke="#fff" stroke-width="14"/>
+      <path d="M0 70L0 170" stroke="#fff" stroke-width="36"/>
+      <path d="M-18 95L45 188" stroke="#00d9ff" stroke-width="24"/>
+      <path d="M18 95L78 155" stroke="#ffd43b" stroke-width="24"/>
+      <path d="M-12 166L36 224L72 220" stroke="#00d9ff" stroke-width="30"/>
+      <path d="M12 166L-72 248L-116 270" stroke="#ffd43b" stroke-width="30"/>
+    </g>
+    <!-- Frame 5: yellow planted, cyan heel lifting behind, torso rises. -->
+    <g transform="translate(1350 72)">
+      <circle cx="0" cy="35" r="25" stroke="#fff" stroke-width="14"/>
+      <path d="M0 70L0 170" stroke="#fff" stroke-width="36"/>
+      <path d="M-18 95L-58 170" stroke="#00d9ff" stroke-width="24"/>
+      <path d="M18 95L52 175" stroke="#ffd43b" stroke-width="24"/>
+      <path d="M-12 166L42 205L75 232" stroke="#00d9ff" stroke-width="30"/>
+      <path d="M12 166L-50 235L-88 260" stroke="#ffd43b" stroke-width="30"/>
+    </g>
+  </g>
+</svg>

@@ -96,3 +96,4 @@ export class TutorialScene extends Phaser.Scene {
     t.c.setPosition(t.slot.x, t.slot.y);
   }
 }
+import Phaser from 'phaser';

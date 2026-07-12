@@ -4,7 +4,7 @@ import { writeSave } from '../save.js';
 import { Sfx } from '../audio.js';
 import { Poki } from '../poki.js';
 import { addTowerImage, fitTowerImageHeight } from '../textures.js';
-import { getLocale, setLocale, t } from '../i18n.js';
+import { getLocale, getLocaleInfo, LOCALES, setLocale, t } from '../i18n.js';
 
 export class MenuScene extends Phaser.Scene {
   constructor() { super('Menu'); }
@@ -22,11 +22,13 @@ export class MenuScene extends Phaser.Scene {
     const panelY = wide ? 640 : 790;
     this.menuCenterX = wide ? viewW / 2 : W / 2;
     this.menuViewW = viewW;
+    this.menuViewH = viewH;
+    this.languageLayer = null;
 
     this.cameras.main.setBackgroundColor('#0b1020');
-    makeButton(this, wide ? viewW - 82 : W - 65, 48, 94, 40, t('language.label'), {
+    makeButton(this, wide ? viewW - 112 : W - 92, 52, 164, 48, `🌐 ${getLocaleInfo().short}`, {
       bg: 0x19283b, stroke: 0x405d78, fontSize: 17,
-      onClick: () => { setLocale(getLocale() === 'en' ? 'zh' : 'en'); window.location.reload(); },
+      onClick: () => this.showLanguageMenu(),
     }).setDepth(100);
     const bg = this.add.graphics().setDepth(-30);
     bg.fillGradientStyle(0x193b43, 0x162f42, 0x0c1829, 0x080e19, 1);
@@ -104,6 +106,48 @@ export class MenuScene extends Phaser.Scene {
     this.checkOfflineChest(S);
   }
 
+  showLanguageMenu() {
+    if (this.languageLayer) return;
+    const cx = this.menuCenterX || W / 2;
+    const viewW = this.menuViewW || W;
+    const viewH = this.menuViewH || H;
+    const cy = viewH / 2;
+    const current = getLocale();
+    const layer = this.add.container(0, 0).setDepth(7000);
+    this.languageLayer = layer;
+
+    const close = () => {
+      layer.destroy();
+      if (this.languageLayer === layer) this.languageLayer = null;
+    };
+    layer.add(this.add.rectangle(cx, cy, viewW, viewH, 0x000000, 0.78).setInteractive());
+    layer.add(this.add.rectangle(cx, cy, 650, 690, 0x111d2e, 0.99).setStrokeStyle(2, 0x6585a2, 0.9));
+    layer.add(this.add.text(cx, cy - 292, `🌐 ${t('settings.language')}`, {
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '34px', color: '#f5e9a7',
+    }).setOrigin(0.5));
+
+    LOCALES.forEach((locale, index) => {
+      const col = index % 3;
+      const row = Math.floor(index / 3);
+      const active = locale.code === current;
+      layer.add(makeButton(this, cx + (col - 1) * 198, cy - 205 + row * 78, 182, 62,
+        `${active ? '✓ ' : ''}${locale.label}`, {
+          bg: active ? 0x24624f : 0x26364a,
+          stroke: active ? 0x65d6a0 : 0x53677f,
+          fontSize: locale.label.length > 14 ? 14 : 17,
+          onClick: () => {
+            if (locale.code === current) { close(); return; }
+            setLocale(locale.code);
+            window.location.reload();
+          },
+        }));
+    });
+
+    layer.add(makeButton(this, cx, cy + 286, 300, 58, t('common.close'), {
+      bg: 0x3a4558, stroke: 0x65748b, fontSize: 22, onClick: close,
+    }));
+  }
+
   checkOfflineChest(S) {
     if (S.lastSeen <= 0) return;
     const hours = (Date.now() - S.lastSeen) / 3600000;
@@ -143,3 +187,4 @@ export class MenuScene extends Phaser.Scene {
     }));
   }
 }
+import Phaser from 'phaser';

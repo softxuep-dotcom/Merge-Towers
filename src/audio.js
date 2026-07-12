@@ -372,7 +372,6 @@ export const Sfx = {
   buy()   { tone({ freq: 440, end: 660, dur: 0.1, type: 'triangle', vol: 0.2 }); },
   sell()  { tone({ freq: 500, end: 250, dur: 0.15, type: 'triangle', vol: 0.2 }); },
   hit()   { noise({ dur: 0.04, vol: 0.05 }); },
-  kill()  { noise({ dur: 0.09, vol: 0.1 }); tone({ freq: 220, end: 110, dur: 0.1, type: 'square', vol: 0.06 }); },
   leak()  { tone({ freq: 200, end: 90, dur: 0.35, type: 'sawtooth', vol: 0.25 }); },
   bossIn() {
     tone({ freq: 65, dur: 0.6, type: 'sawtooth', vol: 0.35 });
