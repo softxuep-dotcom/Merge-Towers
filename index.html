@@ -63,14 +63,7 @@
     var percent = document.getElementById('loading-percent');
     if (!loading || loading.classList.contains('hidden')) return;
     if (percent && percent.textContent !== '0%') return;
-    if (sessionStorage.getItem('mergeTowersReloaded')) {
-      window.showLoadingError('Loading failed. Please refresh.');
-      return;
-    }
-    sessionStorage.setItem('mergeTowersReloaded', '1');
-    var url = new URL(window.location.href);
-    url.searchParams.set('v', Date.now().toString());
-    window.location.replace(url.toString());
+    window.showLoadingError('Loading failed. Please refresh.');
   }, 8000);
 </script>
 </body>
