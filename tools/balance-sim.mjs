@@ -17,7 +17,8 @@ const AVG_UNIT_DPS = (() => {   // 平均每个 Lv1 等效单位的 DPS（五元
   return es.reduce((s, e) => s + e.base * e.rate, 0) / es.length;
 })();
 const CONSOLIDATION = lv => dmgFactor(lv) / Math.pow(2, lv - 1); // 合成聚合加成：伤害系数/单位数（自动适配分段增长）
-const BRANCH_MULT = 1.25;       // Lv4+ 分支平均战力系数（含腐蚀/圣辉增伤与碎冰控制收益）
+const BRANCH_MULT = 1.25;       // Lv5–6 分支平均战力系数（Lv3 较弱、Lv7 为终极强化）
+const branchMultFor = lv => (lv >= 7 ? 1.35 : lv >= 5 ? BRANCH_MULT : lv >= 3 ? 1.15 : 1);
 const SURGE_BONUS = 0.08;       // 手动玩家的合成冲击等效 DPS 加成
 
 // ---------- 期望波构成（复刻 GameScene.composeWave 的权重，取期望值） ----------
@@ -135,7 +136,7 @@ function simulate(archKey, priceKey, floorKey = 'current', maxWave = 70) {
     // 战斗结算（期望模型）
     const st = waveStats(w);
     const mainLv = estimateMainLv(state.units);
-    const branch = mainLv >= 4 ? BRANCH_MULT : 1;
+    const branch = branchMultFor(mainLv);
     const dps = state.units * AVG_UNIT_DPS * GROUP_MULT * CONSOLIDATION(mainLv) * branch * (1 + A.surge);
     const capacity = dps * st.duration * UTILIZATION;
     const clearRatio = Math.min(1, capacity / st.totalHp);

@@ -35,10 +35,14 @@ export class BootScene extends Phaser.Scene {
     const save = loadSave();
     setMuted(save.muted);
     this.registry.set('save', save);
-    Poki.init().then(() => Poki.gameLoadingFinished());
-    // 首屏直接开局；主菜单保留在局内暂停入口。
-    this.scene.start('Game');
-    window.finishLoading?.();
+    // Poki 只会在 SDK 初始化完成后记录 gameplayStart；先完成加载上报，再进入玩法场景。
+    Poki.init().then(async () => {
+      Poki.gameLoadingFinished();
+      window.finishLoading?.();
+      // 给 Inspector 一帧处理加载完成事件，然后进入首页等待玩家主动开始。
+      await new Promise(resolve => window.requestAnimationFrame(resolve));
+      this.scene.start('Menu');
+    });
   }
 }
 import Phaser from 'phaser';

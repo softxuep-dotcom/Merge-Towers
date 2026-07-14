@@ -50,12 +50,22 @@ export const Poki = {
   gameplayStart() { sdk()?.gameplayStart?.(); },
   gameplayStop()  { sdk()?.gameplayStop?.(); },
   // 插屏广告：resolve 后继续游戏
-  async commercialBreak() {
+  async commercialBreak({ maxWaitMs = 0 } = {}) {
     const s = sdk();
     if (!s) return;
     setAudioPaused(true, 'poki');
     setInputPaused(true);
-    try { await s.commercialBreak(); } catch (e) {}
+    try {
+      const ad = Promise.resolve().then(() => s.commercialBreak()).catch(() => {});
+      if (maxWaitMs > 0) {
+        await Promise.race([
+          ad,
+          new Promise(resolve => window.setTimeout(resolve, maxWaitMs)),
+        ]);
+      } else {
+        await ad;
+      }
+    } catch (e) {}
     finally {
       setInputPaused(false);
       setAudioPaused(adBreakDepth > 0, 'poki');

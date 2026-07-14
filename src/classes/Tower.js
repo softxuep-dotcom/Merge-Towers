@@ -1,6 +1,6 @@
 import {
-  ELEMENTS, FIRE_BRANCH_BALANCE, MAX_LV, TOWER_BRANCHES, TOWER_RANGE_MULT,
-  towerDmg, towerRange,
+  BRANCH_START_LV, ELEMENTS, FIRE_BRANCH_BALANCE, MAX_LV, TOWER_BRANCHES, TOWER_RANGE_MULT,
+  branchTierValue, towerDmg, towerRange,
 } from '../config.js';
 import { addTowerImage, applyTowerImage, fitTowerImageHeight } from '../textures.js';
 
@@ -20,7 +20,7 @@ export class Tower {
     this.elem = elem;
     this.lv = lv;
     this.id = scene.nextTowerId++;
-    this.branch = lv >= 4 ? branch : null;
+    this.branch = lv >= BRANCH_START_LV ? branch : null;
     this.cooldown = 0;
     this.dragging = false;
     this.selfBuffT = 0;
@@ -44,7 +44,7 @@ export class Tower {
       fontFamily: 'Arial Black, sans-serif', fontSize: '16px', color: '#ffffff',
     }).setOrigin(0.5);
     const children = [this.shadow, this.highlightGlow];
-    if (lv >= 4) {
+    if (lv >= BRANCH_START_LV) {
       this.branchBadge = scene.add.circle(-22, 8, 13, 0x1c1f2e, this.branch ? 0.92 : 0.72)
         .setStrokeStyle(2, this.branchAccent());
       this.branchText = scene.add.text(-22, 8, this.branchLabel(), {
@@ -58,7 +58,7 @@ export class Tower {
       scene.tweens.add({ targets: this.aura, scale: 3.1, alpha: 0.5, duration: 800, yoyo: true, repeat: -1 });
     }
     children.push(this.spr, this.badge, this.lvText);
-    if (lv >= 4) children.push(this.branchBadge, this.branchText);
+    if (lv >= BRANCH_START_LV) children.push(this.branchBadge, this.branchText);
     this.c = scene.add.container(slot.x, slot.y - 8, children);
     this.c.setDepth(slot.y);
     // The painted crystal extends well above the base. Keep the entire visible
@@ -72,8 +72,13 @@ export class Tower {
   get dmg() { return towerDmg(this.elem, this.lv); }
   get range() { return towerRange(this.lv) * (TOWER_RANGE_MULT[this.elem] || 1); }
   get rate() {
-    const branchMult = this.elem === 'fire' && this.branch === 'b' && this.lv >= 4
-      ? FIRE_BRANCH_BALANCE.moltenRateMult
+    const branchMult = this.elem === 'fire' && this.branch === 'b' && this.lv >= BRANCH_START_LV
+      ? branchTierValue(
+          this.lv,
+          FIRE_BRANCH_BALANCE.moltenRateMult.lv3,
+          FIRE_BRANCH_BALANCE.moltenRateMult.lv5,
+          FIRE_BRANCH_BALANCE.moltenRateMult.lv7,
+        )
       : 1;
     return ELEMENTS[this.elem].rate * branchMult;
   }
@@ -84,7 +89,7 @@ export class Tower {
   // 攻击间隔计时；buffMult = 光 Lv7 全场攻速 buff
   tickCooldown(dts, buffMult) {
     if (this.selfBuffT > 0) this.selfBuffT = Math.max(0, this.selfBuffT - dts);
-    const selfBuff = this.selfBuffT > 0 ? 1.5 : 1;
+    const selfBuff = this.selfBuffT > 0 ? (this.selfBuffMult || 1.5) : 1;
     this.cooldown -= dts * this.rate * buffMult * selfBuff;
   }
   ready() { return this.cooldown <= 0; }
@@ -104,7 +109,7 @@ export class Tower {
   }
 
   setBranch(branch) {
-    this.branch = this.lv >= 4 ? branch : null;
+    this.branch = this.lv >= BRANCH_START_LV ? branch : null;
     this.refreshVisual();
     if (!this.branchText) return;
     this.branchText.setText(this.branchLabel());

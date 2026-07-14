@@ -1,5 +1,8 @@
 import Phaser from 'phaser';
-import { ENEMY_TYPES, ELITE, waveHp, BOSS_AFFIXES, BOSS_CONTROL } from '../config.js';
+import {
+  BRANCH_START_LV, ENEMY_TYPES, ELITE, PLAGUE, waveHp, BOSS_AFFIXES, BOSS_CONTROL,
+  branchTierValue,
+} from '../config.js';
 import { t } from '../i18n.js';
 import {
   paintedEnemyAnimationSource,
@@ -221,10 +224,14 @@ export class Enemy {
     const goldMult = sourceTower?.goldMult || 1;
     const sourceBonus = opts.sourceBonus || 0;
     const branchEffects = opts.branchEffects !== false;
-    const poisonBranch = branchEffects && sourceTower?.elem === 'poison' && sourceTower.lv >= 4 ? sourceTower.branch : null;
+    const poisonBranch = branchEffects && sourceTower?.elem === 'poison' && sourceTower.lv >= BRANCH_START_LV ? sourceTower.branch : null;
     const plague = poisonBranch === 'a';
-    const plagueRadius = plague ? (sourceTower.lv >= 7 ? 190 : 95) : 0;
-    if (poisonBranch === 'b') this.applyCorrosion(sourceTower.lv >= 7 ? 0.5 : 0.25, 5);
+    const plagueRadius = plague
+      ? branchTierValue(sourceTower.lv, PLAGUE.lv3SpreadRadius, PLAGUE.lv5SpreadRadius, PLAGUE.lv7SpreadRadius)
+      : 0;
+    if (poisonBranch === 'b') {
+      this.applyCorrosion(branchTierValue(sourceTower.lv, 0.15, 0.3, 0.5), 5);
+    }
     const stack = { dps, t: 5, lv7, goldMult, plague, plagueRadius, sourceBonus, sourceTower };
     const ownerOf = tower => {
       while (tower?.dpsSuccessor) tower = tower.dpsSuccessor;

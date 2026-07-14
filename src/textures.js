@@ -1,6 +1,6 @@
 // Lightweight procedural 2.5D sprites aligned with the forest reference art.
 // Keeps M4 package size tiny while the final hand-painted atlas is still absent.
-import { ELEMENTS, ENEMY_TYPES } from './config.js';
+import { BRANCH_START_LV, ELEMENTS, ENEMY_TYPES } from './config.js';
 
 export const PAINTED_TOWER_ATLAS = 'tower_atlas_painted';
 export const PAINTED_TOWER_ATLAS_IMAGE = 'assets/towers/towers-painted-v1.webp';
@@ -15,7 +15,7 @@ const PAINTED_TOWER_FRAMES = {
 };
 
 export function paintedTowerFrameKey(element, level = 1, branch = null) {
-  const variant = level >= 4 && (branch === 'a' || branch === 'b') ? branch : 'base';
+  const variant = level >= BRANCH_START_LV && (branch === 'a' || branch === 'b') ? branch : 'base';
   return PAINTED_TOWER_FRAMES[element]?.[variant] || PAINTED_TOWER_FRAMES[element]?.base || null;
 }
 

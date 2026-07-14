@@ -9,9 +9,9 @@ export const PREP_DURATION_MS = 2000;
 export const EARLY_WAVE_CUTOFF = 5;
 export const EARLY_WAVE_SPAWN_INTERVAL_MULT = 0.6;
 export const DIFFICULTIES = {
-  easy:   { key: 'easy',   cn: t('difficulty.easy'), hpBase: 18, color: 0x59c98f },
-  normal: { key: 'normal', cn: t('difficulty.normal'), hpBase: 20, color: 0xffd34e },
-  hard:   { key: 'hard',   cn: t('difficulty.hard'), hpBase: 25, color: 0xff7a7a },
+  easy:   { key: 'easy',   cn: t('difficulty.easy'), hpBase: 20, color: 0x59c98f },
+  normal: { key: 'normal', cn: t('difficulty.normal'), hpBase: 25, color: 0xffd34e },
+  hard:   { key: 'hard',   cn: t('difficulty.hard'), hpBase: 29, color: 0xff7a7a },
 };
 // 分段伤害增长（v1.21 定版）：Lv1–3 幼年期 1.9，Lv4–8 段 2.0。
 // Lv8 总量 ≈ base×115.5（v1.20 为 158，原始 2.1^7=180）。
@@ -29,7 +29,15 @@ export const ELEMENTS = {
   light:     { key: 'light',     cn: t('element.light'), color: 0xfff3c4, base: 25, rate: 0.6, desc: t('element.execute') },
 };
 
-// Lv4 分支进化（GDD §3.5）
+export const BRANCH_START_LV = 3;
+export const BRANCH_BOOST_LV = 5;
+export const BRANCH_CAPSTONE_LV = 7;
+
+export function branchTierValue(lv, lv3, lv5, lv7) {
+  return lv >= BRANCH_CAPSTONE_LV ? lv7 : (lv >= BRANCH_BOOST_LV ? lv5 : lv3);
+}
+
+// Lv3 分支进化，Lv5 / Lv7 分段强化（GDD §3.5）
 export const TOWER_BRANCHES = {
   fire: {
     a: { key: 'a', cn: t('branch.fireA'), short: 'B', desc: t('branch.fireADesc') },
@@ -73,39 +81,60 @@ export const TOWER_RANGE_MULT = {
 
 export const FIRE_BRANCH_BALANCE = {
   explosiveDamageMult: 0.9,
-  explosiveBurnDpsMult: 0.45,
-  moltenRateMult: 0.7,
+  explosiveRadiusMult: { lv3: 1.35, lv5: 1.6, lv7: 1.6 },
+  explosiveBurnDpsMult: { lv3: 0.35, lv5: 0.45, lv7: 0.45 },
+  explosiveBurnDuration: { lv3: 2, lv5: 3, lv7: 4 },
+  moltenDamageMult: { lv3: 1.7, lv5: 2.2, lv7: 2.2 },
+  moltenRateMult: { lv3: 0.8, lv5: 0.7, lv7: 0.7 },
+  moltenCritChance: { lv3: 0.15, lv5: 0.3, lv7: 0.5 },
 };
 
 export const ICE_SHATTER = {
-  freezeChance: 0.25,
-  radius: 100,
-  freezeDuration: 1.2,
+  lv3FreezeChance: 0.18,
+  lv3Radius: 80,
+  lv3FreezeDuration: 0.9,
+  lv5FreezeChance: 0.28,
+  lv5Radius: 110,
+  lv5FreezeDuration: 1.2,
   lv7FreezeChance: 0.35,
   lv7Radius: 130,
+  lv7FreezeDuration: 1.2,
 };
 
 export const ICE_RIVER = {
-  novaChance: 0.2,
-  mainDamageMult: 2,
-  splashDamageMult: 0.8,
-  novaRadius: 140,
-  novaRadiusPerLv: 8,
+  lv3NovaChance: 0.15,
+  lv3MainDamageMult: 1.6,
+  lv3SplashDamageMult: 0.6,
+  lv3NovaRadius: 156,
+  lv3SlowDuration: 2,
+  lv5NovaChance: 0.22,
+  lv5MainDamageMult: 2.2,
+  lv5SplashDamageMult: 0.9,
+  lv5NovaRadius: 180,
+  lv5SlowDuration: 2.4,
   lv7NovaChance: 0.3,
   lv7MainDamageMult: 2.6,
   lv7SplashDamageMult: 1.2,
+  lv7NovaRadius: 196,
+  lv7SlowDuration: 2.8,
 };
 
 export const LIGHTNING_HUB = {
-  stunChance: 0.25,
+  lv3StunChance: 0.15,
+  lv3StunDuration: 0.8,
+  lv5StunChance: 0.25,
+  lv5StunDuration: 1.2,
   lv7StunChance: 0.35,
-  stunDuration: 1.2,
   lv7StunDuration: 1.6,
 };
 
 export const PLAGUE = {
-  damageMult: 1.35,
+  lv3DamageMult: 1.2,
+  lv3SpreadRadius: 70,
+  lv5DamageMult: 1.4,
+  lv5SpreadRadius: 110,
   lv7DamageMult: 1.6,
+  lv7SpreadRadius: 190,
 };
 
 // 合成冲击 / 连锁共鸣（GDD §3.2 / §3.3）
