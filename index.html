@@ -3,8 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Merge Towers</title>
-<script src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>
+<script async src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>
 <style>
   :root { color-scheme: dark; --ink: #061019; --surface: #0e1d2b; --line: #4f7080; --mint: #63d6a3; --gold: #f3c95f; }
   html, body { margin: 0; padding: 0; background: var(--ink); width: 100%; height: 100%; overflow: hidden; }
@@ -22,7 +25,7 @@
   #loading-percent { color: #90a8b6; font-size: 12px; font-weight: 700; letter-spacing: .12em; }
   @media (prefers-reduced-motion: reduce) { #loading, #loading-fill { transition: none; } }
 </style>
-  <script type="module" crossorigin src="./assets/index-SnbZfJ07.js"></script>
+  <script type="module" crossorigin src="./assets/index-DfFGD9Fx.js"></script>
 </head>
 <body>
 <div id="loading" role="status" aria-live="polite">
@@ -45,7 +48,30 @@
     loading.classList.add('hidden');
     setTimeout(function () { loading.remove(); }, 300);
   };
+  window.showLoadingError = function (message) {
+    var percent = document.getElementById('loading-percent');
+    if (percent) percent.textContent = message || 'Loading failed. Please refresh.';
+  };
+  window.addEventListener('error', function (event) {
+    window.showLoadingError('Loading failed. Refreshing...');
+  });
+  window.addEventListener('unhandledrejection', function () {
+    window.showLoadingError('Loading failed. Refreshing...');
+  });
+  setTimeout(function () {
+    var loading = document.getElementById('loading');
+    var percent = document.getElementById('loading-percent');
+    if (!loading || loading.classList.contains('hidden')) return;
+    if (percent && percent.textContent !== '0%') return;
+    if (sessionStorage.getItem('mergeTowersReloaded')) {
+      window.showLoadingError('Loading failed. Please refresh.');
+      return;
+    }
+    sessionStorage.setItem('mergeTowersReloaded', '1');
+    var url = new URL(window.location.href);
+    url.searchParams.set('v', Date.now().toString());
+    window.location.replace(url.toString());
+  }, 8000);
 </script>
-
 </body>
 </html>
