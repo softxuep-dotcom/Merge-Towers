@@ -63,7 +63,9 @@ export class GameScene extends Phaser.Scene {
   create() {
     const S = this.S = this.registry.get('save');
     const forceTutorial = import.meta.env.DEV && new URLSearchParams(window.location.search).has('tutorial');
-    this.firstRunTutorial = forceTutorial || (S.tutorialVersion || 0) < CURRENT_TUTORIAL_VERSION;
+    // 波 1 的合成教学每局都执行；首访状态只用于免费 2 倍速，不影响初始塔种。
+    this.isFirstOnboarding = forceTutorial || (S.tutorialVersion || 0) < CURRENT_TUTORIAL_VERSION;
+    this.firstRunTutorial = true;
     // ---- 局内状态 ----
     this.gold = Math.round((40 + 20 * tier(S, 'startGold')) * (S.coupon ? 1.5 : 1));
     if (S.coupon) { S.coupon = false; writeSave(S); }
@@ -87,7 +89,7 @@ export class GameScene extends Phaser.Scene {
     this.lastStandText = null;
     this.deathWave = 0;
     this.adGifts = 0;
-    this.runSpeedUnlocked = this.firstRunTutorial || tier(S, 'speed2x') > 0;
+    this.runSpeedUnlocked = this.isFirstOnboarding || tier(S, 'speed2x') > 0;
     this.speedMult = 1;
     this.slowmoT = 0;
     this.atkBuffT = 0;
@@ -125,7 +127,8 @@ export class GameScene extends Phaser.Scene {
     this.leakStats = {};
     this.dmgCount = 0;
     this.coinCount = 0;
-    this.tutorialStep = this.firstRunTutorial ? 'waitForEnemy' : null;
+    this.tutorialStep = 'waitForEnemy';
+    this.tutorialBuildPending = false;
     this.tutorialElem = 'fire';
     this.tutorialTowerA = null;
     this.tutorialTowerB = null;
@@ -162,8 +165,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     Poki.gameplayStart();
-    if (this.firstRunTutorial) this.startFirstRunTutorial();
-    else this.startPrep();
+    this.startFirstRunTutorial();
   }
 
   // ================= 场景搭建 =================
@@ -593,21 +595,14 @@ export class GameScene extends Phaser.Scene {
 
   // ================= 开局预置 =================
   presetTowers() {
-    if (this.firstRunTutorial) {
-      const a = this.slots[1], b = this.slots[2];
-      this.tutorialTowerA = new Tower(this, a, this.tutorialElem, 1);
-      this.tutorialTowerB = new Tower(this, b, this.tutorialElem, 1);
-      a.tower = this.tutorialTowerA;
-      b.tower = this.tutorialTowerB;
-      this.towers.push(this.tutorialTowerA, this.tutorialTowerB);
-      return;
-    }
-    const elems = unlockedElements(this.S, this.wave);
-    const elem = Phaser.Utils.Array.GetRandom(elems);
+    const elem = Math.random() < 0.5 ? 'fire' : 'lightning';
+    this.tutorialElem = elem;
     const a = this.slots[1], b = this.slots[2]; // 第一排中间相邻两格
-    a.tower = new Tower(this, a, elem, 1);
-    b.tower = new Tower(this, b, elem, 1);
-    this.towers.push(a.tower, b.tower);
+    this.tutorialTowerA = new Tower(this, a, elem, 1);
+    this.tutorialTowerB = new Tower(this, b, elem, 1);
+    a.tower = this.tutorialTowerA;
+    b.tower = this.tutorialTowerB;
+    this.towers.push(this.tutorialTowerA, this.tutorialTowerB);
   }
 
   startFirstRunTutorial() {
@@ -836,6 +831,45 @@ export class GameScene extends Phaser.Scene {
     toast(this, W / 2, 390, t('game.tutorialReady'), '#8ff0b6', 25);
     this.buyBtn.setEnabled(true);
     this.updateUI();
+    this.startTutorialBuildCue();
+  }
+
+  startTutorialBuildCue() {
+    this.tutorialBuildPending = true;
+    const bannerY = this.layout?.landscape
+      ? Math.min(690, this.layout.viewH - 52)
+      : 970;
+    this.setTutorialInstruction('game.tutorialBuild', bannerY);
+    this.clearTutorialHighlight();
+    this.tutorialHighlight = this.add.rectangle(this.buyBtn.x, this.buyBtn.y, 1, 1, 0xffdd66, 0.08)
+      .setStrokeStyle(6, 0xffdd66, 1)
+      .setDepth(2390);
+    this.syncTutorialBuildHighlight();
+    this.tweens.add({
+      targets: this.tutorialHighlight,
+      alpha: 0.28,
+      duration: 460,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut',
+    });
+  }
+
+  syncTutorialBuildHighlight() {
+    if (!this.tutorialBuildPending || !this.tutorialHighlight || !this.buyBtn) return;
+    const scaleX = Math.abs(this.buyBtn.scaleX || 1);
+    const scaleY = Math.abs(this.buyBtn.scaleY || 1);
+    this.tutorialHighlight
+      .setPosition(this.buyBtn.x, this.buyBtn.y)
+      .setDisplaySize((this.buyBtn.width || 326) * scaleX + 18, (this.buyBtn.height || 112) * scaleY + 18);
+  }
+
+  completeTutorialBuildPurchase() {
+    if (!this.tutorialBuildPending) return;
+    this.tutorialBuildPending = false;
+    this.clearTutorialHighlight();
+    if (this.tutorialBanner) { this.tutorialBanner.destroy(); this.tutorialBanner = null; }
+    if (this.tutorialText) { this.tutorialText.destroy(); this.tutorialText = null; }
   }
 
   clearHint() {
@@ -1512,6 +1546,7 @@ export class GameScene extends Phaser.Scene {
     Sfx.buy();
     this.clearPendingTowerDraft();
     this.clearHint();
+    this.completeTutorialBuildPurchase();
     if (this.firstRunTutorial && this.tutorialStep === 'place') {
       this.startMergeTutorial(this.tutorialTowerA, placedTower);
     }
@@ -2659,7 +2694,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   autoBuyTick() {
-    if (this.firstRunTutorial || !tier(this.S, 'autoBuy') || this.over || this.dying || this.evolutionChoiceOpen || this.editorMode) return;
+    if (this.firstRunTutorial || this.tutorialBuildPending || !tier(this.S, 'autoBuy') || this.over || this.dying || this.evolutionChoiceOpen || this.editorMode) return;
     this.buyTower(true);
   }
 
@@ -3335,6 +3370,7 @@ export class GameScene extends Phaser.Scene {
   // ================= 主循环 =================
   update(time, delta) {
     this.ensureResponsiveLayout();
+    this.syncTutorialBuildHighlight();
     if (this.over || this.editorMode || this.isPaused || this.settingsOpen) return;
     let dts = (delta / 1000) * this.speedMult;
     if (this.tutorialForcedSlowmo) dts *= 0.5;
