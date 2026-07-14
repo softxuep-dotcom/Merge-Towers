@@ -267,6 +267,165 @@ class GameVfx {
     this.cameras.main.shake(strong ? 210 : 140, strong ? 0.005 : 0.0032);
   }
 
+  playIceShatterFx(x, y, radius, strong = false) {
+    const visualRadius = Phaser.Math.Clamp(radius, 88, 132);
+    const power = visualRadius / 100;
+    const shardCount = strong ? 12 : 10;
+    const crackCount = strong ? 5 : 4;
+
+    // 0-80ms: the cold core snaps inward before the actual fracture.
+    const compressedCore = this.add.image(x, y - 5, 'glow')
+      .setTint(0x8deaff)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0.42)
+      .setScale(0.72 * power)
+      .setDepth(2093);
+    this.tweens.add({
+      targets: compressedCore,
+      scaleX: 0.16 * power,
+      scaleY: 0.1 * power,
+      alpha: 0.78,
+      duration: 76,
+      ease: 'Cubic.In',
+      onComplete: () => compressedCore.destroy(),
+    });
+
+    // 80-140ms: a single white-blue peak, deliberately smaller than a nova.
+    const flash = this.add.image(x, y - 5, 'glow')
+      .setTint(0xf4fdff)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0)
+      .setScale(0.12 * power)
+      .setDepth(2097);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0.98,
+      scaleX: 0.72 * power,
+      scaleY: 0.5 * power,
+      delay: 76,
+      duration: 34,
+      ease: 'Cubic.Out',
+      onComplete: () => {
+        this.tweens.add({
+          targets: flash,
+          alpha: 0,
+          scaleX: 1.08 * power,
+          scaleY: 0.72 * power,
+          duration: 72,
+          ease: 'Quad.Out',
+          onComplete: () => flash.destroy(),
+        });
+      },
+    });
+
+    const cracks = this.add.graphics({ x, y: y - 4 }).setAlpha(0).setScale(0.24).setDepth(2095);
+    const crackAngles = [];
+    for (let i = 0; i < crackCount; i++) {
+      const angle = (Math.PI * 2 * i / crackCount) + Phaser.Math.FloatBetween(-0.38, 0.38);
+      crackAngles.push(angle);
+      const inner = visualRadius * Phaser.Math.FloatBetween(0.05, 0.12);
+      const mid = visualRadius * Phaser.Math.FloatBetween(0.25, 0.38);
+      const outer = visualRadius * Phaser.Math.FloatBetween(0.48, 0.72);
+      const bend = Phaser.Math.FloatBetween(-0.16, 0.16);
+      const p0 = { x: Math.cos(angle) * inner, y: Math.sin(angle) * inner * 0.72 };
+      const p1 = { x: Math.cos(angle + bend) * mid, y: Math.sin(angle + bend) * mid * 0.72 };
+      const p2 = { x: Math.cos(angle - bend * 0.55) * outer, y: Math.sin(angle - bend * 0.55) * outer * 0.72 };
+      cracks.lineStyle(strong ? 5 : 4, 0x42c9ef, 0.24);
+      cracks.lineBetween(p0.x, p0.y, p1.x, p1.y);
+      cracks.lineBetween(p1.x, p1.y, p2.x, p2.y);
+      cracks.lineStyle(strong ? 2 : 1.5, 0xf2fdff, 0.96);
+      cracks.lineBetween(p0.x, p0.y, p1.x, p1.y);
+      cracks.lineBetween(p1.x, p1.y, p2.x, p2.y);
+      if (i % 2 === 0) {
+        const branchAngle = angle + (i % 4 === 0 ? 0.42 : -0.38);
+        cracks.lineBetween(
+          p1.x,
+          p1.y,
+          p1.x + Math.cos(branchAngle) * visualRadius * 0.18,
+          p1.y + Math.sin(branchAngle) * visualRadius * 0.12,
+        );
+      }
+    }
+    this.tweens.add({
+      targets: cracks,
+      alpha: 1,
+      scale: 1,
+      delay: 80,
+      duration: 48,
+      ease: 'Cubic.Out',
+      onComplete: () => {
+        this.tweens.add({
+          targets: cracks,
+          alpha: 0,
+          duration: 155,
+          ease: 'Quad.In',
+          onComplete: () => cracks.destroy(),
+        });
+      },
+    });
+
+    // 140-650ms: a few large facets lead, followed by more small splinters.
+    for (let i = 0; i < shardCount; i++) {
+      const tier = i < 2 ? 'large' : (i < (strong ? 6 : 5) ? 'medium' : 'small');
+      const angle = (Math.PI * 2 * i / shardCount) + Phaser.Math.FloatBetween(-0.22, 0.22);
+      const firstDistance = visualRadius * Phaser.Math.FloatBetween(0.42, 0.65);
+      const secondDistance = visualRadius * Phaser.Math.FloatBetween(0.88, 1.24);
+      const lift = tier === 'large' ? Phaser.Math.Between(9, 18) : Phaser.Math.Between(3, 13);
+      const baseScale = power * (tier === 'large' ? 0.92 : tier === 'medium' ? 0.84 : 0.78);
+      const shard = this.add.image(x, y - 5, `shatter_shard_${tier}`)
+        .setAlpha(0)
+        .setScale(baseScale * 0.12)
+        .setAngle(Phaser.Math.RadToDeg(angle) + 90 + Phaser.Math.Between(-14, 14))
+        .setDepth(2094 + (i % 3));
+      const burstDelay = 112 + Phaser.Math.Between(0, 24);
+      this.tweens.add({
+        targets: shard,
+        x: x + Math.cos(angle) * firstDistance,
+        y: y - 5 + Math.sin(angle) * firstDistance * 0.68 - lift,
+        alpha: 1,
+        scale: baseScale,
+        angle: shard.angle + Phaser.Math.Between(-80, 80),
+        delay: burstDelay,
+        duration: Phaser.Math.Between(105, 142),
+        ease: 'Cubic.Out',
+        onComplete: () => {
+          this.tweens.add({
+            targets: shard,
+            x: x + Math.cos(angle) * secondDistance,
+            y: y - 5 + Math.sin(angle) * secondDistance * 0.68 + visualRadius * Phaser.Math.FloatBetween(0.16, 0.34),
+            alpha: 0,
+            scaleX: baseScale * 0.72,
+            scaleY: baseScale * 0.82,
+            angle: shard.angle + Phaser.Math.Between(-150, 150),
+            duration: Phaser.Math.Between(300, 410),
+            ease: 'Quad.Out',
+            onComplete: () => shard.destroy(),
+          });
+        },
+      });
+    }
+
+    this.time.delayedCall(108, () => {
+      const chips = this.add.particles(x, y - 5, 'shatter_chip', {
+        angle: { min: 0, max: 360 },
+        speed: { min: 125 * power, max: 295 * power },
+        gravityY: 310,
+        rotate: { min: -420, max: 420 },
+        scale: { start: 0.72 * power, end: 0.12 },
+        alpha: { start: 0.94, end: 0 },
+        lifespan: { min: 360, max: 590 },
+        tint: [0x58cfee, 0xa9efff, 0xf4fdff],
+        emitting: false,
+      }).setDepth(2098);
+      chips.explode(strong ? 24 : 19);
+      this.time.delayedCall(620, () => chips.destroy());
+    });
+
+    this.time.delayedCall(82, () => {
+      this.cameras.main.shake(strong ? 115 : 90, strong ? 0.0032 : 0.0022);
+    });
+  }
+
   playPlagueBurstFx(x, y, radius, targets = []) {
     const cloud = this.add.image(x, y, 'glow')
       .setTint(0x7ede55)

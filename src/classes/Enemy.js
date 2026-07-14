@@ -53,6 +53,8 @@ export class Enemy {
     this.path = path;
     this.maxHp = waveHp(wave, opts.difficulty) * this.type.hpMult * (opts.hpMult || 1);
     this.hp = this.maxHp;
+    this.minHp = Math.max(0, opts.minHp || 0);
+    this.minHpSpeedMult = opts.minHpSpeedMult || 1;
     this.progress = opts.progress || 0;
     this.dead = false;
     this.armor = Math.min(0.8, (this.type.armor || 0) + (opts.armorBonus || 0));
@@ -266,8 +268,8 @@ export class Enemy {
     }
     const amp = 1 + Math.min(1, Math.max(0, (this.corrodedT > 0 ? this.corrosionPct : 0) + (sourceBonus || 0)));
     const real = (trueDmg ? dmg : dmg * (1 - this.armor)) * amp;
-    const applied = Math.min(this.hp, real);
-    this.hp -= real;
+    const applied = Math.max(0, Math.min(this.hp - this.minHp, real));
+    this.hp -= applied;
     if (this.scene.recordTowerDamage) this.scene.recordTowerDamage(sourceTower, applied);
     this.barBg.setVisible(true); this.bar.setVisible(true);
     this.bar.width = Math.max(0, this.healthBarWidth * (this.hp / this.maxHp));
@@ -275,7 +277,7 @@ export class Enemy {
     this.spr.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
     this.scene.time.delayedCall(45, () => { if (!this.dead) this.restoreTint(); });
     if (this.hp <= 0) this.die(cause);
-    return real;
+    return applied;
   }
 
   heal(amount) {
@@ -362,6 +364,7 @@ export class Enemy {
       speedFactor = 1 - this.slowPct / 100;
       if (this.slowT <= 0) { this.slowPct = 0; this.restoreTint(); }
     }
+    if (this.minHp > 0 && this.hp <= this.minHp) speedFactor *= this.minHpSpeedMult;
 
     let speedMult = this.speedMult || 1;
     if (this.rageActive) speedMult *= this.rageSpeedMult || 1;
@@ -407,7 +410,11 @@ export class Enemy {
     if (this.facingDirection !== direction || this.facingSourceDirection !== sourceDirection) {
       this.facingDirection = direction;
       this.facingSourceDirection = sourceDirection;
-      this.spr.play(animKey);
+      // Left/right share one source strip and differ only by flipX. Restarting
+      // that strip on every mirror change repeatedly snaps the Boss to frame 1
+      // around curved turns, which reads as a twitch rather than a direction
+      // change. Only switch playback when the actual source animation changes.
+      if (this.spr.anims?.currentAnim?.key !== animKey) this.spr.play(animKey);
     }
     this.spr.setFlipX(sourceDirection !== 'front' && paintedEnemyDirectionFlipX(direction));
     // 侧身帧的双脚重心会随朝向偏离画布中心；阴影跟随脚底重心，避免产生

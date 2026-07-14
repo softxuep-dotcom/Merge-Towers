@@ -36,9 +36,8 @@ export class BootScene extends Phaser.Scene {
     setMuted(save.muted);
     this.registry.set('save', save);
     Poki.init().then(() => Poki.gameLoadingFinished());
-    const isEditor = new URLSearchParams(window.location.search).has('editor');
-    // 编辑模式必须进入 GameScene 才会挂载 pathEditor。
-    this.scene.start(isEditor ? 'Game' : 'Menu');
+    // 首屏直接开局；主菜单保留在局内暂停入口。
+    this.scene.start('Game');
     window.finishLoading?.();
   }
 }

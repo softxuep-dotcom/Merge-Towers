@@ -144,6 +144,10 @@ export function paintedEnemyAnimationSource(scene, typeKey, direction) {
 }
 
 function paintedEnemyFrameRate(typeKey, frameCount) {
+  // The Boss source preview is authored at roughly 5 FPS. Playing the same
+  // five-frame gait at the generic 9 FPS makes its large side silhouette snap
+  // between poses instead of reading as a heavy walk.
+  if (typeKey === 'boss') return 5;
   const cyclesPerSecond = typeKey === 'runner' || typeKey === 'flyer' ? 2.25 : 1.75;
   return Math.max(1, Math.round(frameCount * cyclesPerSecond));
 }
@@ -480,6 +484,36 @@ export function generateTextures(scene) {
   g.lineStyle(1, 0x4fc3ff, 0.55);
   g.strokePoints(p([[9, 0], [16, 8], [12, 25], [9, 28], [6, 25], [2, 8]]), true, true);
   g.generateTexture('ice_shard', 18, 30);
+
+  // Shatter gets its own angular silhouettes. The violet-blue back faces keep
+  // these readable as physical fragments instead of the frost nova's motes.
+  const makeShatterShard = (key, w, h) => {
+    const cx = w * 0.5;
+    g.clear();
+    g.fillStyle(0x34408f, 0.98);
+    g.fillPoints(p([[cx, 0], [w - 1, h * 0.3], [w * 0.7, h - 1], [cx, h * 0.82], [1, h * 0.42]]), true);
+    g.fillStyle(0x36bfe8, 1);
+    g.fillPoints(p([[cx, 1], [w * 0.72, h * 0.31], [cx, h * 0.8], [w * 0.18, h * 0.4]]), true);
+    g.fillStyle(0xbdf6ff, 0.98);
+    g.fillPoints(p([[cx, 2], [w * 0.57, h * 0.32], [cx, h * 0.72], [w * 0.3, h * 0.39]]), true);
+    g.fillStyle(0xffffff, 0.94);
+    g.fillTriangle(cx, 2, w * 0.54, h * 0.3, w * 0.39, h * 0.38);
+    g.lineStyle(Math.max(1, Math.round(w * 0.06)), 0xe9fdff, 0.92);
+    g.strokePoints(p([[cx, 0], [w - 1, h * 0.3], [w * 0.7, h - 1], [cx, h * 0.82], [1, h * 0.42]]), true, true);
+    g.generateTexture(key, w, h);
+  };
+  makeShatterShard('shatter_shard_large', 24, 46);
+  makeShatterShard('shatter_shard_medium', 18, 34);
+  makeShatterShard('shatter_shard_small', 12, 23);
+
+  g.clear();
+  g.fillStyle(0x2f4d9b, 0.96);
+  g.fillTriangle(1, 7, 6, 0, 9, 9);
+  g.fillStyle(0x68dcff, 1);
+  g.fillTriangle(2, 6, 6, 1, 6, 8);
+  g.fillStyle(0xf1fdff, 0.96);
+  g.fillTriangle(4, 5, 6, 1, 6, 6);
+  g.generateTexture('shatter_chip', 10, 10);
 
   g.clear();
   g.lineStyle(2, 0xe8f8ff, 0.98);

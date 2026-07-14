@@ -1,16 +1,10 @@
 // 数值模拟器：把每波的 收入/塔价/玩家DPS/需求DPS 跑成表，预测墓碑波
 // 用法: node tools/balance-sim.mjs
 // 数据源: 直接 import src/config.js —— 改数值后重跑即可看曲线，无需开游戏
-// config.js 是浏览器 ESM，但项目 package.json 无 type:module（server.js 是 CJS）
-// → 读源码后经 data-URL 按 ESM 导入
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-const cfgSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/config.js'), 'utf8');
 const {
   waveHp, waveCount, spawnFloor, towerPrice, nonBossSpeedMult, dmgFactor,
   ENEMY_TYPES, ELEMENTS, ELITE, BASE_HP, MAX_LV,
-} = await import('data:text/javascript;base64,' + Buffer.from(cfgSrc).toString('base64'));
+} = await import('../src/config.js');
 
 // ---------- 软参数（战斗抽象模型，锚定校准见 README 注释） ----------
 const PATH_LEN = 2514;          // 地面路径像素长

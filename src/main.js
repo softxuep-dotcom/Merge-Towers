@@ -20,6 +20,12 @@ const game = window.__game = new Phaser.Game({
   scene: [BootScene, MenuScene, GameScene, ResultScene],
 });
 
+// Poki embeds the game in a scrollable page; gameplay keys must not scroll the host page.
+const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ']);
+window.addEventListener('keydown', event => {
+  if (scrollKeys.has(event.key)) event.preventDefault();
+}, { passive: false });
+
 // 离开页面时记录离线时间戳（离线钻石结算依据）
 function persistSessionExit() {
   const s = game.registry.get('save');

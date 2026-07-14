@@ -6,19 +6,28 @@
 <title>Merge Towers</title>
 <script src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>
 <style>
-  html, body { margin: 0; padding: 0; background: #12131f; width: 100%; height: 100%; overflow: hidden; }
-  #game { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; background: #12131f; }
+  :root { color-scheme: dark; --ink: #061019; --surface: #0e1d2b; --line: #4f7080; --mint: #63d6a3; --gold: #f3c95f; }
+  html, body { margin: 0; padding: 0; background: var(--ink); width: 100%; height: 100%; overflow: hidden; }
+  #game { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; background: var(--ink); }
   canvas { display: block; }
-  #loading { position: fixed; inset: 0; z-index: 10; display: grid; place-content: center; gap: 18px; color: #fff; background: #12131f; font: 700 18px/1.2 Arial, sans-serif; text-align: center; transition: opacity .25s ease; }
+  #loading { position: fixed; inset: 0; z-index: 10; display: grid; place-content: center; justify-items: center; gap: 14px; color: #fff; background: radial-gradient(circle at 50% 34%, #17443f 0, #0b202b 34%, var(--ink) 72%); font: 700 18px/1.2 Arial, sans-serif; text-align: center; transition: opacity .3s ease; }
+  #loading::after { content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .18; background: repeating-linear-gradient(135deg, transparent 0 64px, #8bd8c2 65px, transparent 66px 130px); mask-image: linear-gradient(to bottom, #000, transparent 70%); }
   #loading.hidden { opacity: 0; pointer-events: none; }
-  #loading-bar { width: min(280px, 68vw); height: 10px; overflow: hidden; border: 2px solid #4f536d; border-radius: 999px; background: #202235; }
-  #loading-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #58c98f, #ffd34e); transition: width .12s ease; }
-  #loading-percent { color: #aeb4d0; font-size: 13px; font-weight: 400; }
+  .loading-mark { width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid #6cc6a5; border-radius: 18px; color: var(--gold); background: #102a32cc; box-shadow: 0 14px 40px #0008, inset 0 1px #ffffff1a; font-size: 24px; transform: rotate(45deg); }
+  .loading-mark span { transform: rotate(-45deg); }
+  .loading-kicker { margin-top: 12px; color: #75d6ad; font-size: 10px; letter-spacing: .34em; }
+  .loading-title { color: #f5d675; font: 900 clamp(24px, 6vw, 32px)/1 Arial Black, Arial, sans-serif; letter-spacing: .04em; text-shadow: 0 3px #173646; }
+  #loading-bar { width: min(300px, 72vw); height: 8px; padding: 2px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; background: #08141e; box-shadow: 0 8px 24px #0006; }
+  #loading-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--mint), var(--gold)); transition: width .12s ease; }
+  #loading-percent { color: #90a8b6; font-size: 12px; font-weight: 700; letter-spacing: .12em; }
+  @media (prefers-reduced-motion: reduce) { #loading, #loading-fill { transition: none; } }
 </style>
 </head>
 <body>
 <div id="loading" role="status" aria-live="polite">
-  <div>MERGE TOWERS</div>
+  <div class="loading-mark"><span>◆</span></div>
+  <div class="loading-kicker">STRATEGY · MERGE · DEFEND</div>
+  <div class="loading-title">MERGE TOWERS</div>
   <div id="loading-bar"><div id="loading-fill"></div></div>
   <div id="loading-percent">0%</div>
 </div>

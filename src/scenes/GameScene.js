@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import {
   W, H, MAX_LV, DEFAULT_DIFFICULTY, DIFFICULTIES, ELEMENTS, ENEMY_TYPES, BASE_HP, LEAK_BOSS, LEAK_NORMAL,
   PHASES, phaseFor, towerPrice, towerBasePrice, waveHp, waveCount, spawnFloor, DIAMOND,
+  PREP_DURATION_MS, EARLY_WAVE_CUTOFF, EARLY_WAVE_SPAWN_INTERVAL_MULT,
   towerDmg, towerRange,
   MERGE_SURGE, FIRE_BRANCH_BALANCE, ICE_RIVER, ICE_SHATTER, LIGHTNING_HUB, PLAGUE,
   ELITE, TOWER_BRANCHES, BOSS_AFFIXES,
@@ -9,13 +10,13 @@ import {
 } from '../config.js';
 import { Enemy, Path } from '../classes/Enemy.js';
 import { Tower } from '../classes/Tower.js';
-import { makeButton, makeHudButton, toast } from '../ui.js';
+import { makeButton, makeHudButton, makePanel, toast, UI_THEME } from '../ui.js';
 import {
   Sfx, setMuted, isMuted, unlockAudio,
   startStageAudio, stopStageAudio, setAudioPhase,
 } from '../audio.js';
 import { Poki } from '../poki.js';
-import { writeSave, tier, unlockedElements } from '../save.js';
+import { CURRENT_TUTORIAL_VERSION, writeSave, tier, unlockedElements } from '../save.js';
 import { addTowerImage, fitTowerImageHeight } from '../textures.js';
 import { getLocale, LOCALES, setLocale, t, t as tr } from '../i18n.js';
 import { gameRunAnalysisMethods } from './gameRunAnalysis.js';
@@ -61,6 +62,8 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     const S = this.S = this.registry.get('save');
+    const forceTutorial = import.meta.env.DEV && new URLSearchParams(window.location.search).has('tutorial');
+    this.firstRunTutorial = forceTutorial || (S.tutorialVersion || 0) < CURRENT_TUTORIAL_VERSION;
     // ---- 局内状态 ----
     this.gold = Math.round((40 + 20 * tier(S, 'startGold')) * (S.coupon ? 1.5 : 1));
     if (S.coupon) { S.coupon = false; writeSave(S); }
@@ -84,7 +87,7 @@ export class GameScene extends Phaser.Scene {
     this.lastStandText = null;
     this.deathWave = 0;
     this.adGifts = 0;
-    this.runSpeedUnlocked = tier(S, 'speed2x') > 0;
+    this.runSpeedUnlocked = this.firstRunTutorial || tier(S, 'speed2x') > 0;
     this.speedMult = 1;
     this.slowmoT = 0;
     this.atkBuffT = 0;
@@ -122,13 +125,23 @@ export class GameScene extends Phaser.Scene {
     this.leakStats = {};
     this.dmgCount = 0;
     this.coinCount = 0;
-    this.firstRunTutorial = (S.tutorialVersion || 0) < 1;
-    this.tutorialStep = this.firstRunTutorial ? 'build' : null;
+    this.tutorialStep = this.firstRunTutorial ? 'waitForEnemy' : null;
     this.tutorialElem = 'fire';
     this.tutorialTowerA = null;
     this.tutorialTowerB = null;
     this.tutorialText = null;
     this.tutorialHighlight = null;
+    this.tutorialPointer = null;
+    this.tutorialPath = null;
+    this.tutorialFocusRing = null;
+    this.placementGuideSlot = null;
+    this.tutorialMergeTapCandidate = null;
+    this.tutorialMergeTapZones = [];
+    this.tutorialMergeTapReadyAt = 0;
+    this.tutorialAssistTimer = null;
+    this.tutorialForceTimer = null;
+    this.tutorialFocusBlockers = [];
+    this.tutorialForcedSlowmo = false;
     this.installAudioLifecycle();
 
     this.path = new Path(PATH_PTS);
@@ -144,7 +157,7 @@ export class GameScene extends Phaser.Scene {
     this.time.addEvent({ delay: 800, loop: true, callback: () => this.autoMergeTick() });
 
     // 开发工具：?editor=1 进入点击式路径编辑器（见 src/dev/pathEditor.js）
-    if (new URLSearchParams(window.location.search).has('editor')) {
+    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('editor')) {
       import('../dev/pathEditor.js').then(m => m.startPathEditor(this));
       return;
     }
@@ -203,26 +216,33 @@ export class GameScene extends Phaser.Scene {
     this.flash = this.add.rectangle(W / 2, H / 2, W, H, 0xffffff, 0).setDepth(2950);
   }
 
-  // 拖拽时高亮所有空塔位
-  showFreeSlots(on) {
+  // 放置时突出推荐塔位，其余空位保留较弱提示；拖拽时统一高亮所有空位。
+  showFreeSlots(on, focusSlot = null) {
     for (const s of this.slots) {
-      s.ring.setStrokeStyle(3, 0xffe97a, on && !s.tower ? 0.7 : 0);
+      if (!on || s.tower) {
+        s.ring.setFillStyle(0xffe97a, 0).setStrokeStyle(3, 0xffe97a, 0);
+      } else if (s === focusSlot) {
+        s.ring.setFillStyle(0x65e6ae, 0.16).setStrokeStyle(6, 0x8ff0b6, 1);
+      } else {
+        s.ring.setFillStyle(0xffe97a, 0.035).setStrokeStyle(2, 0xffe97a, focusSlot ? 0.32 : 0.7);
+      }
     }
   }
 
   buildUI() {
-    this.layoutBg = this.add.rectangle(W / 2, H / 2, W, H, 0x12131f, 1).setDepth(-40);
-    this.sidebarBg = this.add.rectangle(W / 2, H / 2, 1, 1, 0x161825, 0.94).setDepth(995).setVisible(false);
-    this.sidebarDivider = this.add.rectangle(W / 2, H / 2, 2, H, 0x2d3348, 1).setDepth(996).setVisible(false);
+    this.layoutBg = this.add.rectangle(W / 2, H / 2, W, H, 0x061019, 1).setDepth(-40);
+    this.sidebarBg = this.add.rectangle(W / 2, H / 2, 1, 1, UI_THEME.ink, 0.96).setDepth(995).setVisible(false);
+    this.sidebarDivider = this.add.rectangle(W / 2, H / 2, 2, H, UI_THEME.lineSoft, 1).setDepth(996).setVisible(false);
 
-    // 朴素状态栏：信息直接落在半透明条上，只用细分隔线组织层级。
-    this.topBar = this.add.rectangle(W / 2, 36, W, 72, 0x0b1421, 0.88).setDepth(1000);
-    this.topAccent = this.add.rectangle(W / 2, 71, W, 2, 0x65c9a5, 0.34).setDepth(1001);
+    // 状态栏：资源成组、操作靠右，保持战场中央完全无遮挡。
+    this.topBar = this.add.rectangle(W / 2, 36, W, 72, UI_THEME.ink, 0.93).setDepth(1000);
+    this.topAccent = this.add.rectangle(W / 2, 71, W, 2, UI_THEME.primaryBright, 0.46).setDepth(1001);
     this.topSep1 = this.add.rectangle(166, 36, 1, 34, 0x9bb2c8, 0.16).setDepth(1001);
     this.topSep2 = this.add.rectangle(258, 36, 1, 34, 0x9bb2c8, 0.16).setDepth(1001);
     this.topSep3 = this.add.rectangle(412, 36, 1, 34, 0x9bb2c8, 0.16).setDepth(1001);
     this.topSep4 = this.add.rectangle(548, 36, 1, 34, 0x9bb2c8, 0.16).setDepth(1001);
-    const pill = (x, y, w, h) => this.add.rectangle(x, y, w, h, 0x0b1421, 0).setDepth(1001);
+    const pill = (x, y, w, h) => this.add.rectangle(x, y, w, h, UI_THEME.surfaceRaised, 0.44)
+      .setStrokeStyle(1, UI_THEME.line, 0.22).setDepth(1001);
     this.wavePill = pill(84, 36, 158, 44);
     this.heartPill = pill(210, 36, 84, 44);
     this.goldPill = pill(334, 36, 144, 44);
@@ -258,30 +278,31 @@ export class GameScene extends Phaser.Scene {
     this.refreshHudMute();
 
     // Boss HUD：保留头像识别，只使用细框与扁平血条。
-    this.bossBarFrame = this.add.rectangle(W / 2, 94, 620, 40, 0x0b1421, 0.8)
-      .setStrokeStyle(1, 0x6d7d91, 0.38).setDepth(1000).setVisible(false);
+    this.bossBarFrame = this.add.rectangle(W / 2, 94, 620, 40, UI_THEME.ink, 0.88)
+      .setStrokeStyle(1, 0x8b5961, 0.58).setDepth(1000).setVisible(false);
     this.bossHudIcon = this.add.image(72, 94, 'ui_icons', 'boss').setDepth(1002).setDisplaySize(36, 36).setVisible(false);
     this.bossBarBg = this.add.rectangle(102, 94, 520, 12, 0x05080d, 0.92).setOrigin(0, 0.5).setDepth(1001).setVisible(false);
     this.bossBar = this.add.rectangle(104, 94, 516, 8, 0xc83a57).setOrigin(0, 0.5).setDepth(1002).setVisible(false);
 
     // 下一波预告
-    this.previewBg = this.add.rectangle(W / 2, 104, 430, 48, 0x0b1421, 0.7)
-      .setStrokeStyle(1, 0x7892aa, 0.22).setDepth(999).setVisible(false);
+    this.previewBg = this.add.rectangle(W / 2, 104, 430, 48, UI_THEME.surface, 0.84)
+      .setStrokeStyle(1, UI_THEME.line, 0.4).setDepth(999).setVisible(false);
     this.previewText = this.uiText(W / 2, 104, '', 18, '#d7e2ed').setOrigin(0.5).setAlign('center');
 
     // 底部面板（背景图模式半透明，露出城堡）
-    this.bottomPanel = this.add.rectangle(W / 2, 1197, W, 166, 0x0b1421, this.hasBg ? 0.84 : 0.94).setDepth(1000);
-    this.bottomAccent = this.add.rectangle(W / 2, 1114, W, 2, 0x65c9a5, 0.35).setDepth(1001);
+    this.bottomPanel = this.add.rectangle(W / 2, 1197, W, 166, UI_THEME.ink, this.hasBg ? 0.9 : 0.97).setDepth(1000);
+    this.bottomAccent = this.add.rectangle(W / 2, 1114, W, 2, UI_THEME.primaryBright, 0.5).setDepth(1001);
 
     // 提前召唤
     this.callBtn = makeHudButton(this, W / 2, 1012, 370, 58, t('game.call'), {
-      simple: true, frame: 'button_primary', icon: 'play', iconSize: 30, fontSize: 18,
+      simple: true, frame: 'button_primary', icon: 'play', iconSize: 30, fontSize: 18, radius: 16,
       onClick: () => this.startWave(true),
     }).setDepth(1002).setVisible(false);
 
     // 买塔（核心按钮）
     this.buyBtn = makeHudButton(this, 350, 1170, 326, 112, '', {
       simple: true, frame: 'button_primary', icon: 'build', iconSize: 48, iconX: -104, labelX: 30, fontSize: 25,
+      radius: 22, shadowAlpha: 0.42,
       onClick: () => this.buyTower(),
     }).setDepth(1002);
     this.buyPriceText = this.add.text(108, 0, '', {
@@ -293,7 +314,7 @@ export class GameScene extends Phaser.Scene {
     // 回收区
     this.sellRect = new Phaser.Geom.Rectangle(18, 1114, 142, 112);
     this.sellSkin = this.add.rectangle(89, 1170, 142, 112, 0x3d2932, 0.92)
-      .setStrokeStyle(1, 0x76505e, 0.9).setDepth(1001);
+      .setStrokeStyle(1, 0x9b5f69, 0.8).setDepth(1001);
     this.sellZone = this.add.rectangle(89, 1170, 142, 112, 0xffffff, 0.001).setDepth(1003);
     this.sellIcon = this.add.image(89, 1148, 'ui_icons', 'recycle').setDepth(1002).setDisplaySize(38, 38);
     this.sellText = this.uiText(89, 1190, t('game.sell'), 18, '#ffe8ec').setOrigin(0.5).setDepth(1002);
@@ -303,13 +324,13 @@ export class GameScene extends Phaser.Scene {
 
     // 广告送塔
     this.giftBtn = makeHudButton(this, 625, 1138, 158, 58, '', {
-      simple: true, frame: 'button_secondary', icon: 'gift', iconSize: 26, iconX: -57, labelX: 9, fontSize: 11,
+      simple: true, frame: 'button_secondary', icon: 'gift', iconSize: 26, iconX: -57, labelX: 9, fontSize: 11, radius: 14,
       onClick: () => this.adGiftTower(),
     }).setDepth(1002);
 
     // 2 倍速（局外解锁后显示）
     this.speedBtn = makeHudButton(this, 625, 1202, 158, 58, '', {
-      simple: true, frame: 'button_secondary', icon: 'speed2x', iconSize: 30, iconX: -50, labelX: 18, fontSize: 18,
+      simple: true, frame: 'button_secondary', icon: 'speed2x', iconSize: 30, iconX: -50, labelX: 18, fontSize: 18, radius: 14,
       onClick: () => this.toggleSpeed(),
     }).setDepth(1002);
     this.updateSpeedButton();
@@ -378,8 +399,10 @@ export class GameScene extends Phaser.Scene {
 
   applyPortraitUI() {
     const bottom = this.layout.viewH;
-    const panelH = 166;
-    const panelY = bottom - panelH / 2;
+    // 超长手机把地图下方的额外画布收进指令坞，避免出现像渲染空洞一样的黑带。
+    const panelTop = Math.min(H, bottom - 166);
+    const panelH = bottom - panelTop;
+    const panelY = panelTop + panelH / 2;
     const callY = bottom - 198;
     const actionY = bottom - 74;
 
@@ -425,7 +448,7 @@ export class GameScene extends Phaser.Scene {
     this.setUi(this.previewText, W / 2, 104).setOrigin(0.5).setFontSize(18);
 
     this.setUiRect(this.bottomPanel, W / 2, panelY, W, panelH);
-    this.setUiRect(this.bottomAccent, W / 2, bottom - panelH + 1, W, 2);
+    this.setUiRect(this.bottomAccent, W / 2, panelTop + 1, W, 2);
     this.setUi(this.callBtn, W / 2, callY);
     this.setUi(this.buyBtn, 350, actionY).setScale(0.76);
     this.sellRect = new Phaser.Geom.Rectangle(24, actionY - 40, 104, 80);
@@ -565,38 +588,43 @@ export class GameScene extends Phaser.Scene {
     this.giftBtn.setEnabled(giftLeft > 0);
     if (this.firstRunTutorial) {
       this.giftBtn.setEnabled(false);
-      this.speedBtn.setEnabled(false);
     }
   }
 
   // ================= 开局预置 =================
   presetTowers() {
     if (this.firstRunTutorial) {
-      const slot = this.slots[6];
-      this.tutorialTowerA = new Tower(this, slot, this.tutorialElem, 1);
-      slot.tower = this.tutorialTowerA;
-      this.towers.push(this.tutorialTowerA);
+      const a = this.slots[1], b = this.slots[2];
+      this.tutorialTowerA = new Tower(this, a, this.tutorialElem, 1);
+      this.tutorialTowerB = new Tower(this, b, this.tutorialElem, 1);
+      a.tower = this.tutorialTowerA;
+      b.tower = this.tutorialTowerB;
+      this.towers.push(this.tutorialTowerA, this.tutorialTowerB);
       return;
     }
     const elems = unlockedElements(this.S, this.wave);
     const elem = Phaser.Utils.Array.GetRandom(elems);
-    const a = this.slots[6], b = this.slots[7]; // 下排相邻两格
+    const a = this.slots[1], b = this.slots[2]; // 第一排中间相邻两格
     a.tower = new Tower(this, a, elem, 1);
     b.tower = new Tower(this, b, elem, 1);
     this.towers.push(a.tower, b.tower);
   }
 
   startFirstRunTutorial() {
-    this.waveState = 'tutorial';
-    this.setTutorialInstruction('game.tutorialBuild', 970);
-    this.clearTutorialHighlight();
-    this.tutorialHighlight = this.add.rectangle(this.buyBtn.x, this.buyBtn.y, 352, 132, 0x65e6ae, 0.035)
-      .setStrokeStyle(5, 0x74efb8, 0.95)
-      .setDepth(2390);
-    this.tweens.add({ targets: this.tutorialHighlight, scale: 1.06, alpha: 0.42, duration: 620, yoyo: true, repeat: -1 });
-    this.buyBtn.setEnabled(true);
+    this.tutorialStep = 'waitForEnemy';
+    this.buyBtn.setEnabled(false);
     this.giftBtn.setEnabled(false);
-    this.speedBtn.setEnabled(false);
+    this.startPrep();
+  }
+
+  maybeStartFirstRunMergeTutorial() {
+    if (!this.firstRunTutorial || this.tutorialStep !== 'waitForEnemy' || this.wave !== 1 || this.waveState !== 'active') return;
+    const alive = this.enemies.filter(enemy => !enemy.dead);
+    if (alive.length < 3) return;
+    const nearFight = alive.some(enemy => [this.tutorialTowerA, this.tutorialTowerB].some(tower => tower
+      && Phaser.Math.Distance.Between(enemy.x, enemy.y, tower.slot.x, tower.slot.y) <= tower.range + 70));
+    if (!nearFight) return;
+    this.startMergeTutorial(this.tutorialTowerA, this.tutorialTowerB);
   }
 
   setTutorialInstruction(key, y = 970) {
@@ -606,8 +634,10 @@ export class GameScene extends Phaser.Scene {
         .setStrokeStyle(2, 0x6dd6ac, 0.7).setDepth(2380);
       this.tutorialText = this.uiText(x, y, '', 24, '#eaf8f2').setOrigin(0.5).setDepth(2381);
     }
+    const label = t(key);
+    const fontSize = label.length > 46 ? 18 : (label.length > 34 ? 21 : 24);
     this.tutorialBanner.setPosition(x, y);
-    this.tutorialText.setPosition(x, y).setText(t(key));
+    this.tutorialText.setPosition(x, y).setFontSize(fontSize).setText(label);
   }
 
   clearTutorialHighlight() {
@@ -617,41 +647,195 @@ export class GameScene extends Phaser.Scene {
     this.tutorialHighlight = null;
   }
 
+  makeActionPointer(x, y, color = 0x8ff0b6) {
+    const halo = this.add.circle(0, 0, 28, color, 0.12).setStrokeStyle(3, color, 0.55);
+    const touch = this.add.circle(0, 0, 12, 0xffffff, 0.96).setStrokeStyle(4, color, 1);
+    const chevron = this.add.triangle(0, 34, -10, 22, 10, 22, 0, 36, color, 0.96);
+    return this.add.container(x, y, [halo, touch, chevron]).setDepth(2395);
+  }
+
+  clearTutorialActionCue() {
+    if (this.tutorialAssistTimer) {
+      this.tutorialAssistTimer.remove(false);
+      this.tutorialAssistTimer = null;
+    }
+    if (this.tutorialForceTimer) {
+      this.tutorialForceTimer.remove(false);
+      this.tutorialForceTimer = null;
+    }
+    for (const cue of [this.tutorialPointer, this.tutorialFocusRing]) {
+      if (!cue) continue;
+      this.tweens.killTweensOf(cue);
+      cue.destroy();
+    }
+    if (this.tutorialPath) this.tutorialPath.destroy();
+    this.tutorialPointer = null;
+    this.tutorialFocusRing = null;
+    this.tutorialPath = null;
+    this.placementGuideSlot = null;
+  }
+
+  clearTutorialMergeTap() {
+    for (const zone of this.tutorialMergeTapZones) zone.destroy();
+    for (const blocker of this.tutorialFocusBlockers) blocker.destroy();
+    this.tutorialMergeTapZones = [];
+    this.tutorialFocusBlockers = [];
+    this.tutorialMergeTapCandidate = null;
+    this.tutorialMergeTapReadyAt = 0;
+    if (this.tutorialForcedSlowmo) {
+      this.tutorialForcedSlowmo = false;
+      this.time.timeScale = this.speedMult;
+      this.tweens.timeScale = this.speedMult;
+    }
+  }
+
+  enableTutorialMergeTap() {
+    this.clearTutorialMergeTap();
+    this.tutorialMergeTapReadyAt = this.time.now + 350;
+  }
+
+  startPlacementGuide(slot, color) {
+    this.clearTutorialActionCue();
+    if (!slot) return;
+    this.placementGuideSlot = slot;
+    this.showFreeSlots(true, slot);
+    const ringY = slot.ring?.y ?? slot.y;
+    this.tutorialFocusRing = this.add.circle(slot.x, ringY, 52, color, 0.1)
+      .setStrokeStyle(5, color, 0.95)
+      .setDepth(2389);
+    this.tutorialPointer = this.makeActionPointer(slot.x, ringY - 86, color);
+    this.tweens.add({
+      targets: this.tutorialFocusRing,
+      scale: 1.24,
+      alpha: 0.32,
+      duration: 520,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut',
+    });
+    this.tweens.add({
+      targets: this.tutorialPointer,
+      y: ringY - 56,
+      scale: 1.1,
+      duration: 620,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut',
+    });
+  }
+
   startMergeTutorial(a, b) {
+    this.clearTutorialActionCue();
+    this.showFreeSlots(false);
     this.tutorialStep = 'merge';
     this.tutorialTowerA = a;
     this.tutorialTowerB = b;
     a.setHighlight(true);
     b.setHighlight(true);
     this.setTutorialInstruction('game.tutorialMerge', 390);
-    if (this.tutorialHand) this.tutorialHand.destroy();
-    this.tutorialHand = this.uiText(a.slot.x, a.slot.y - 92, '👆', 42).setOrigin(0.5).setDepth(2395);
+    const start = { x: a.slot.x, y: a.slot.y - 34 };
+    const end = { x: b.slot.x, y: b.slot.y - 34 };
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const length = Math.max(1, Math.hypot(dx, dy));
+    const ux = dx / length;
+    const uy = dy / length;
+    const tipX = end.x - ux * 34;
+    const tipY = end.y - uy * 34;
+    const sideX = -uy * 13;
+    const sideY = ux * 13;
+    this.tutorialPath = this.add.graphics().setDepth(2392);
+    this.tutorialPath.lineStyle(7, 0x8ff0b6, 0.82);
+    this.tutorialPath.lineBetween(start.x + ux * 30, start.y + uy * 30, tipX, tipY);
+    this.tutorialPath.fillStyle(0x8ff0b6, 0.95);
+    this.tutorialPath.fillTriangle(
+      end.x, end.y,
+      tipX + sideX, tipY + sideY,
+      tipX - sideX, tipY - sideY,
+    );
+    this.tutorialFocusRing = this.add.circle(end.x, end.y, 56, 0x8ff0b6, 0.08)
+      .setStrokeStyle(5, 0x8ff0b6, 0.9)
+      .setDepth(2391);
+    this.tutorialPointer = this.makeActionPointer(start.x, start.y, 0x8ff0b6);
+    this.tutorialAssistTimer = this.time.delayedCall(8000, () => {
+      if (!this.firstRunTutorial || this.tutorialStep !== 'merge' || a.merging || b.merging) return;
+      this.setTutorialInstruction('game.tutorialMergeAssist', 390);
+      a.setHighlight(true);
+      b.setHighlight(true);
+      this.tutorialPath.clear();
+      this.tutorialPath.lineStyle(11, 0x8ff0b6, 0.96);
+      this.tutorialPath.lineBetween(start.x + ux * 30, start.y + uy * 30, tipX, tipY);
+      this.tutorialPath.fillStyle(0x8ff0b6, 1);
+      this.tutorialPath.fillTriangle(end.x, end.y, tipX + sideX, tipY + sideY, tipX - sideX, tipY - sideY);
+      this.tutorialForceTimer = this.time.delayedCall(7000, () => {
+        if (!this.firstRunTutorial || this.tutorialStep !== 'merge' || a.merging || b.merging) return;
+        this.showTutorialMergeFocus(a, b);
+      });
+    });
     this.tweens.add({
-      targets: this.tutorialHand,
-      x: b.slot.x,
-      y: b.slot.y - 92,
-      duration: 900,
-      hold: 260,
-      repeatDelay: 260,
+      targets: this.tutorialFocusRing,
+      scale: 1.2,
+      alpha: 0.3,
+      duration: 540,
+      yoyo: true,
       repeat: -1,
       ease: 'Sine.InOut',
     });
+    this.tweens.add({
+      targets: this.tutorialPointer,
+      x: end.x,
+      y: end.y,
+      duration: 820,
+      hold: 180,
+      repeatDelay: 320,
+      repeat: -1,
+      ease: 'Sine.InOut',
+    });
+  }
+
+  showTutorialMergeFocus(a, b) {
+    this.tutorialForcedSlowmo = true;
+    this.time.timeScale = 0.5;
+    this.tweens.timeScale = 0.5;
+    const minX = Math.min(a.slot.x, b.slot.x) - 86;
+    const maxX = Math.max(a.slot.x, b.slot.x) + 86;
+    const minY = Math.min(a.slot.y, b.slot.y) - 135;
+    const maxY = Math.max(a.slot.y, b.slot.y) + 76;
+    const makeBlocker = (x, y, width, height) => this.add.rectangle(x, y, width, height, 0x02070c, 0.68)
+      .setDepth(2398).setInteractive();
+    this.tutorialFocusBlockers = [
+      makeBlocker(W / 2, minY / 2, W, minY),
+      makeBlocker(W / 2, maxY + (H - maxY) / 2, W, H - maxY),
+      makeBlocker(minX / 2, (minY + maxY) / 2, minX, maxY - minY),
+      makeBlocker(maxX + (W - maxX) / 2, (minY + maxY) / 2, W - maxX, maxY - minY),
+    ];
+    this.enableTutorialMergeTap();
+    const mergeOnTap = () => {
+      if (!this.firstRunTutorial || this.tutorialStep !== 'merge' || a.merging || b.merging) return;
+      this.clearTutorialMergeTap();
+      this.doMerge(a, b);
+    };
+    this.tutorialMergeTapZones = [a, b].map(tower => this.add.circle(tower.slot.x, tower.slot.y - 8, 74, 0xffffff, 0.001)
+      .setDepth(2400)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', mergeOnTap));
   }
 
   completeFirstRunTutorial(mergedTower) {
     this.firstRunTutorial = false;
     this.tutorialStep = null;
     this.S.tutorialDone = true;
-    this.S.tutorialVersion = 1;
+    this.S.tutorialVersion = CURRENT_TUTORIAL_VERSION;
     writeSave(this.S);
     mergedTower.setHighlight(false);
     this.clearTutorialHighlight();
-    if (this.tutorialHand) { this.tweens.killTweensOf(this.tutorialHand); this.tutorialHand.destroy(); this.tutorialHand = null; }
+    this.clearTutorialActionCue();
+    this.clearTutorialMergeTap();
     if (this.tutorialBanner) { this.tutorialBanner.destroy(); this.tutorialBanner = null; }
     if (this.tutorialText) { this.tutorialText.destroy(); this.tutorialText = null; }
     toast(this, W / 2, 390, t('game.tutorialReady'), '#8ff0b6', 25);
+    this.buyBtn.setEnabled(true);
     this.updateUI();
-    this.startPrep();
   }
 
   clearHint() {
@@ -762,7 +946,7 @@ export class GameScene extends Phaser.Scene {
     }));
     this.previewBg.setVisible(true);
     this.callBtn.setVisible(true);
-    this.prepTimer = this.time.delayedCall(4000, () => this.startWave(false));
+    this.prepTimer = this.time.delayedCall(PREP_DURATION_MS, () => this.startWave(false));
     this.updateUI();
   }
 
@@ -786,7 +970,8 @@ export class GameScene extends Phaser.Scene {
 
     const queue = this.pending.slice();
     this.spawnLeft = queue.length;
-    const interval = Phaser.Math.Clamp(15 / queue.length, 0.35, 1.2) * 1000;
+    const earlyMult = this.wave <= EARLY_WAVE_CUTOFF ? EARLY_WAVE_SPAWN_INTERVAL_MULT : 1;
+    const interval = Phaser.Math.Clamp(15 / queue.length, 0.35, 1.2) * earlyMult * 1000;
     let i = 0;
     this.spawnEvent = this.time.addEvent({
       delay: interval, repeat: queue.length - 1, startAt: interval - 200,
@@ -826,6 +1011,10 @@ export class GameScene extends Phaser.Scene {
     const t = ENEMY_TYPES[typeKey];
     const path = t.flying ? this.flyPath : this.path;
     const spawnOpts = { ...opts, difficulty: this.difficulty };
+    if (this.firstRunTutorial && this.wave === 1) {
+      spawnOpts.minHp = 1;
+      spawnOpts.minHpSpeedMult = 0.05;
+    }
     if (!t.boss) {
       const event = this.waveEvent;
       if (event) {
@@ -875,11 +1064,11 @@ export class GameScene extends Phaser.Scene {
     }
     const finished = this.wave;
     this.wave++;
-    if (this.wave === 6) {
+    if (this.wave === 4) {
       this.banner(t('game.venomUnlock'));
       toast(this, W / 2, 245, t('game.venomTip'), '#7ede55', 28);
     }
-    if (this.wave === 11) {
+    if (this.wave === 8) {
       this.banner(t('game.lightUnlock'));
       toast(this, W / 2, 245, t('game.lightTip'), '#fff3c4', 28);
     }
@@ -1125,8 +1314,14 @@ export class GameScene extends Phaser.Scene {
       ? [{ elem: this.tutorialElem, branch: null }]
       : this.buildTowerChoices(lv);
     if (this.firstRunTutorial) {
-      this.tutorialStep = 'choose';
       this.clearTutorialHighlight();
+      // 首次教学只有一个固定选项，跳过冗余的单选卡片，买塔后直接进入放置。
+      if (choices.length === 1) {
+        this.beginTowerPlacement(choices[0].elem, lv, cost, choices[0].branch);
+        this.updateUI();
+        return true;
+      }
+      this.tutorialStep = 'choose';
       this.setTutorialInstruction('game.tutorialChoose', 760);
     }
     this.showTowerChoices(lv, cost, choices);
@@ -1179,8 +1374,10 @@ export class GameScene extends Phaser.Scene {
       0.001,
     )
       .setInteractive();
-    const panel = this.add.rectangle(centerX, panelY, panelW, panelH, 0x171b29, 0.94)
-      .setStrokeStyle(2, 0x4a5578);
+    const panel = makePanel(this, centerX, panelY, panelW, panelH, {
+      fill: UI_THEME.surface, alpha: 0.96, radius: 22, stroke: UI_THEME.line,
+      strokeAlpha: 0.58, accentColor: UI_THEME.primaryBright, accentWidth: 82,
+    });
     const title = this.uiText(centerX, titleY, t('game.pickTower', { count: choices.length, level: lv, cost }), wide ? 22 : 24, '#ffe97a')
       .setOrigin(0.5);
     const cancel = makeButton(this, cancelX, cancelY, 82, 42, t('game.cancel'), {
@@ -1236,7 +1433,8 @@ export class GameScene extends Phaser.Scene {
     this.clearTowerChoiceLayer();
     this.ensureResponsiveLayout();
     if (lv >= 4 && !branch) branch = this.randomBranch(elem);
-    this.pendingTowerDraft = { elem, lv, branch, cost };
+    // 防止选择/购买按钮的同一次 pointerdown 冒泡后立刻触发场地放置。
+    this.pendingTowerDraft = { elem, lv, branch, cost, readyAt: this.time.now + 150 };
     if (this.firstRunTutorial) {
       this.tutorialStep = 'place';
       this.setTutorialInstruction('game.tutorialPlace', 390);
@@ -1249,7 +1447,16 @@ export class GameScene extends Phaser.Scene {
         .setDepth(2450);
       this.placementHint.setStroke('#000000', 5);
     }
-    this.showFreeSlots(true);
+    const free = this.slots.filter(slot => !slot.tower);
+    const recommended = this.firstRunTutorial && this.slots[7] && !this.slots[7].tower
+      ? this.slots[7]
+      : free.reduce((best, slot) => {
+          if (!best || !this.tutorialTowerA) return best || slot;
+          const bestDistance = Phaser.Math.Distance.Between(best.x, best.y, this.tutorialTowerA.slot.x, this.tutorialTowerA.slot.y);
+          const distance = Phaser.Math.Distance.Between(slot.x, slot.y, this.tutorialTowerA.slot.x, this.tutorialTowerA.slot.y);
+          return distance < bestDistance ? slot : best;
+        }, null);
+    this.startPlacementGuide(recommended, ELEMENTS[elem].color);
     this.updateUI();
   }
 
@@ -1267,6 +1474,7 @@ export class GameScene extends Phaser.Scene {
 
   clearPendingTowerDraft() {
     this.pendingTowerDraft = null;
+    this.clearTutorialActionCue();
     if (this.placementHint) {
       this.placementHint.destroy();
       this.placementHint = null;
@@ -1276,13 +1484,18 @@ export class GameScene extends Phaser.Scene {
 
   tryPlacePendingTower(pointer) {
     if (!this.pendingTowerDraft || this.over || this.dying || this.evolutionChoiceOpen) return false;
+    if (this.time.now < (this.pendingTowerDraft.readyAt || 0)) return false;
     const px = pointer.worldX ?? pointer.x;
     const py = pointer.worldY ?? pointer.y;
-    let nearest = null, nd = 58;
+    let nearest = null, nd = 78;
     for (const s of this.slots) {
       if (s.tower) continue;
       const d = Phaser.Math.Distance.Between(px, py, s.x, s.y);
       if (d < nd) { nd = d; nearest = s; }
+    }
+    // 首次教学允许任意点击落到推荐格，避免玩家因触点偏离平台而卡住。
+    if (!nearest && this.firstRunTutorial && this.tutorialStep === 'place' && this.placementGuideSlot) {
+      nearest = this.placementGuideSlot;
     }
     if (!nearest) return false;
 
@@ -1330,12 +1543,19 @@ export class GameScene extends Phaser.Scene {
     const completesTutorial = this.firstRunTutorial && this.tutorialStep === 'merge'
       && ((a === this.tutorialTowerA && b === this.tutorialTowerB)
         || (a === this.tutorialTowerB && b === this.tutorialTowerA));
+    if (completesTutorial) this.clearTutorialMergeTap();
     const pop = () => {
       a.destroy(); b.destroy();
       const mergedTower = this.placeTower(slot, elem, lv, branch, { animate: false, scale: 0.22 });
       this.mergeWaveTowerStats(mergedTower, [a, b]);
       mergedTower.c.setAlpha(0.85);
       const resonance = this.registerMergeResonance(mergedTower, !!opts.auto);
+      if (completesTutorial) {
+        for (const enemy of this.enemies) {
+          enemy.minHp = 0;
+          enemy.minHpSpeedMult = 1;
+        }
+      }
       this.playMergePop(mergedTower, resonance, !!opts.auto);
       this.clearHint();
       // 里程碑质变提示（GDD §3.3）
@@ -1409,19 +1629,23 @@ export class GameScene extends Phaser.Scene {
   openPause() {
     if (this.isPaused || this.over || this.dying) return;
     this.isPaused = true;
+    Poki.gameplayStop();
     this.time.timeScale = 0;
     this.tweens.timeScale = 0;
     this.ensureResponsiveLayout();
     const cx = this.layout.x(this.layout.viewW / 2), cy = this.layout.viewH / 2;
     const layer = this.add.container(0, 0).setDepth(7000);
     this.pauseLayer = layer;
-    layer.add(this.add.rectangle(cx, cy, this.layout.viewW, this.layout.viewH, 0x070a12, 0.82).setInteractive());
-    layer.add(this.add.rectangle(cx, cy, 500, 470, 0x182238, 0.98).setStrokeStyle(3, 0x668cb2));
+    layer.add(this.add.rectangle(cx, cy, this.layout.viewW, this.layout.viewH, 0x02070c, 0.84).setInteractive());
+    layer.add(makePanel(this, cx, cy, 500, 470, {
+      fill: UI_THEME.surface, radius: 26, stroke: UI_THEME.line, strokeAlpha: 0.72,
+      accentColor: UI_THEME.primaryBright, accentWidth: 86,
+    }));
     layer.add(this.add.text(cx, cy - 150, t('game.pauseTitle'), {
-      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '46px', color: '#fff0a6',
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '44px', color: '#f5d675',
     }).setOrigin(0.5));
     layer.add(this.add.text(cx, cy - 92, t('game.pauseDesc'), {
-      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '22px', color: '#aebfd5',
+      fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '22px', color: UI_THEME.textSoft,
     }).setOrigin(0.5));
     layer.add(makeButton(this, cx, cy + 5, 360, 82, t('game.resume'), {
       bg: 0x2e755b, stroke: 0x65d6a0, fontSize: 30, onClick: () => this.closePause(),
@@ -1436,8 +1660,11 @@ export class GameScene extends Phaser.Scene {
     const cx = this.layout.x(this.layout.viewW / 2), cy = this.layout.viewH / 2;
     const layer = this.add.container(0, 0).setDepth(7300);
     this.exitConfirmLayer = layer;
-    layer.add(this.add.rectangle(cx, cy, this.layout.viewW, this.layout.viewH, 0x03050a, 0.72).setInteractive());
-    layer.add(this.add.rectangle(cx, cy, 540, 380, 0x172033, 0.99).setStrokeStyle(3, 0xe06b70));
+    layer.add(this.add.rectangle(cx, cy, this.layout.viewW, this.layout.viewH, 0x020407, 0.8).setInteractive());
+    layer.add(makePanel(this, cx, cy, 540, 380, {
+      fill: 0x171f2d, radius: 24, stroke: 0xc65b66, strokeAlpha: 0.78,
+      accentColor: 0xe06b70, accentWidth: 82,
+    }));
     layer.add(this.add.text(cx, cy - 125, t('game.exitTitle'), {
       fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '36px', color: '#ffb0b0',
     }).setOrigin(0.5));
@@ -1469,6 +1696,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseLayer = null;
     this.time.timeScale = this.speedMult;
     this.tweens.timeScale = this.speedMult;
+    Poki.gameplayStart();
   }
 
   settingsCenter() {
@@ -1484,6 +1712,7 @@ export class GameScene extends Phaser.Scene {
   openSettings() {
     if (this.settingsOpen || this.isPaused || this.over || this.dying || this.evolutionChoiceOpen) return;
     this.settingsOpen = true;
+    Poki.gameplayStop();
     this.settingsPrevTimeScale = this.time.timeScale;
     this.settingsPrevTweenScale = this.tweens.timeScale;
     this.time.timeScale = 0;
@@ -1496,8 +1725,11 @@ export class GameScene extends Phaser.Scene {
     const { x, y, width, height } = this.settingsCenter();
     const layer = this.add.container(0, 0).setDepth(7100);
     this.settingsLayer = layer;
-    layer.add(this.add.rectangle(x, y, width, height, 0x050912, 0.82).setInteractive());
-    layer.add(this.add.rectangle(x, y, 620, 720, 0x111d2e, 0.98).setStrokeStyle(2, 0x6585a2, 0.8));
+    layer.add(this.add.rectangle(x, y, width, height, 0x02070c, 0.84).setInteractive());
+    layer.add(makePanel(this, x, y, 620, 720, {
+      fill: UI_THEME.surface, radius: 26, stroke: UI_THEME.line, strokeAlpha: 0.72,
+      accentColor: UI_THEME.primaryBright, accentWidth: 92,
+    }));
     // 提审/真机测试入口：设置卡片左上角 2 秒内连点 7 次触发一次插屏。
     let secretAdTaps = 0;
     let secretAdDeadline = 0;
@@ -1516,7 +1748,7 @@ export class GameScene extends Phaser.Scene {
     });
     layer.add(secretAdHotspot);
     layer.add(this.add.text(x, y - 310, t('settings.title'), {
-      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '42px', color: '#f5e9a7',
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '40px', color: '#f5d675',
     }).setOrigin(0.5));
     layer.add(this.add.text(x, y - 250, t('settings.language'), {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '21px', color: '#8fa5bb', fontStyle: 'bold',
@@ -1562,10 +1794,13 @@ export class GameScene extends Phaser.Scene {
     const { x, y, width, height } = this.settingsCenter();
     const layer = this.add.container(0, 0).setDepth(7150);
     this.settingsLayer = layer;
-    layer.add(this.add.rectangle(x, y, width, height, 0x050912, 0.9).setInteractive());
-    layer.add(this.add.rectangle(x, y, 664, 1180, 0x0e1929, 0.99).setStrokeStyle(2, 0x6585a2, 0.8));
+    layer.add(this.add.rectangle(x, y, width, height, 0x02070c, 0.9).setInteractive());
+    layer.add(makePanel(this, x, y, 664, 1180, {
+      fill: 0x0a1825, radius: 24, stroke: UI_THEME.line, strokeAlpha: 0.7,
+      accentColor: UI_THEME.gold, accentWidth: 94,
+    }));
     layer.add(this.add.text(x, 92, t('settings.codexTitle'), {
-      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '38px', color: '#f5e9a7',
+      fontFamily: 'Arial Black, "Microsoft YaHei", sans-serif', fontSize: '38px', color: '#f5d675',
     }).setOrigin(0.5));
     layer.add(this.add.text(x, 132, t('settings.codexHint'), {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '15px', color: '#7890a8', fontStyle: 'bold',
@@ -1632,6 +1867,7 @@ export class GameScene extends Phaser.Scene {
     this.tweens.timeScale = this.settingsPrevTweenScale ?? this.speedMult;
     this.settingsPrevTimeScale = null;
     this.settingsPrevTweenScale = null;
+    Poki.gameplayStart();
   }
 
   playIceMergeAbsorbFx(a, b, x, y) {
@@ -2467,7 +2703,27 @@ export class GameScene extends Phaser.Scene {
     this.rangeCircle = this.add.circle(0, 0, 100, 0xffffff, 0.06).setStrokeStyle(2, 0xffffff, 0.35).setVisible(false).setDepth(900);
 
     this.input.on('pointerdown', pointer => {
+      if (this.firstRunTutorial && this.tutorialStep === 'merge' && this.time.now >= this.tutorialMergeTapReadyAt) {
+        const px = pointer.worldX ?? pointer.x;
+        const py = pointer.worldY ?? pointer.y;
+        const tappedTower = [this.tutorialTowerA, this.tutorialTowerB].find(tower => tower
+          && Phaser.Math.Distance.Between(px, py, tower.slot.x, tower.slot.y - 8) <= 74);
+        this.tutorialMergeTapCandidate = tappedTower ? { x: px, y: py } : null;
+      }
       this.tryPlacePendingTower(pointer);
+    });
+
+    this.input.on('pointerup', pointer => {
+      const candidate = this.tutorialMergeTapCandidate;
+      this.tutorialMergeTapCandidate = null;
+      if (!candidate || !this.firstRunTutorial || this.tutorialStep !== 'merge') return;
+      const px = pointer.worldX ?? pointer.x;
+      const py = pointer.worldY ?? pointer.y;
+      if (Phaser.Math.Distance.Between(candidate.x, candidate.y, px, py) > 22) return;
+      const a = this.tutorialTowerA;
+      const b = this.tutorialTowerB;
+      if (!a || !b || a.merging || b.merging) return;
+      this.doMerge(a, b);
     });
 
     this.input.on('dragstart', (pointer, obj) => {
@@ -2479,6 +2735,7 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       obj.tutorialDragAllowed = true;
+      if (this.firstRunTutorial && this.tutorialStep === 'merge') this.clearTutorialActionCue();
       t.dragging = true;
       t.setDraggingVisual(true);
       obj.setDepth(2600);
@@ -2521,10 +2778,20 @@ export class GameScene extends Phaser.Scene {
       // 回收区
       if (this.sellRect.contains(obj.x, obj.y)) { this.sellTower(t); return; }
       // 找最近塔位
-      let nearest = null, nd = 80;
+      let nearest = null, nd = 96;
       for (const s of this.slots) {
         const d = Phaser.Math.Distance.Between(obj.x, obj.y + 8, s.x, s.y);
         if (d < nd) { nd = d; nearest = s; }
+      }
+      if (this.firstRunTutorial && this.tutorialStep === 'merge') {
+        const other = t === this.tutorialTowerA ? this.tutorialTowerB : this.tutorialTowerA;
+        if (nearest?.tower === other) {
+          this.doMerge(t, other);
+        } else {
+          t.moveTo(t.slot);
+          this.startMergeTutorial(this.tutorialTowerA, this.tutorialTowerB);
+        }
+        return;
       }
       if (!nearest || nearest === t.slot) { t.moveTo(t.slot); return; }
       if (!nearest.tower) {
@@ -2858,7 +3125,7 @@ export class GameScene extends Phaser.Scene {
               if (Math.random() >= chance) return;
               const radius = lv >= 7 ? ICE_SHATTER.lv7Radius : ICE_SHATTER.radius;
               const duration = ICE_SHATTER.freezeDuration;
-              this.playFrostNovaFx(cx, cy, radius, lv >= 7);
+              this.playIceShatterFx(cx, cy, radius, lv >= 7);
               for (const e of [...this.enemies]) {
                 if (e.dead) continue;
                 const distance = Phaser.Math.Distance.Between(cx, cy, e.x, e.y);
@@ -2992,8 +3259,11 @@ export class GameScene extends Phaser.Scene {
     if (!this.revived) {
       // 广告复活（GDD §7）
       const layer = this.add.container(0, 0).setDepth(4000);
-      layer.add(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.7).setInteractive());
-      layer.add(this.add.rectangle(W / 2, 560, 560, 420, 0x1e2233).setStrokeStyle(3, 0x4a5578));
+      layer.add(this.add.rectangle(W / 2, H / 2, W, H, 0x020407, 0.78).setInteractive());
+      layer.add(makePanel(this, W / 2, 560, 560, 420, {
+        fill: 0x171f2d, radius: 24, stroke: 0xb85b66, strokeAlpha: 0.82,
+        accentColor: 0xe06b70, accentWidth: 84,
+      }));
       layer.add(this.uiText(W / 2, 420, t('game.baseCritical'), 44, '#ff7a7a').setOrigin(0.5));
       layer.add(this.uiText(W / 2, 490, t('game.waveOnly', { value: this.wave }), 28, '#c9d2f0').setOrigin(0.5));
       layer.add(makeButton(this, W / 2, 590, 420, 80, t('game.reviveAd'), {
@@ -3067,6 +3337,7 @@ export class GameScene extends Phaser.Scene {
     this.ensureResponsiveLayout();
     if (this.over || this.editorMode || this.isPaused || this.settingsOpen) return;
     let dts = (delta / 1000) * this.speedMult;
+    if (this.tutorialForcedSlowmo) dts *= 0.5;
     if (this.lastStandActive) this.updateLastStand(delta / 1000);
     // 慢镜（按真实时间衰减）
     if (this.slowmoT > 0) {
@@ -3081,6 +3352,7 @@ export class GameScene extends Phaser.Scene {
     // 敌人
     for (const e of [...this.enemies]) e.update(dts);
     this.updateEnemySupport(dts);
+    this.maybeStartFirstRunMergeTutorial();
 
     // 光 Lv7 攻速 buff
     if (this.atkBuffT > 0) this.atkBuffT -= dts;

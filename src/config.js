@@ -4,6 +4,10 @@ import { t } from './i18n.js';
 export const W = 720, H = 1280;
 export const MAX_LV = 8;
 export const DEFAULT_DIFFICULTY = 'easy';
+export const ENEMY_HP_MULT = 1.05;
+export const PREP_DURATION_MS = 2000;
+export const EARLY_WAVE_CUTOFF = 5;
+export const EARLY_WAVE_SPAWN_INTERVAL_MULT = 0.6;
 export const DIFFICULTIES = {
   easy:   { key: 'easy',   cn: t('difficulty.easy'), hpBase: 18, color: 0x59c98f },
   normal: { key: 'normal', cn: t('difficulty.normal'), hpBase: 20, color: 0xffd34e },
@@ -119,7 +123,7 @@ export const MERGE_SURGE = {
 
 // 精英怪（GDD §4.2）
 export const ELITE = {
-  fromWave: 6,
+  fromWave: 3,
   chance: 0.35,
   lateWave: 20,
   lateChance: 0.55,
@@ -172,9 +176,9 @@ export const WAVE_EVENTS = {
 // 波次数值（GDD §4.3）：HP 增速波 22 后压平 1.19→1.155，拉开不同强度玩家的墓碑差距
 export function waveHp(w, difficulty = DEFAULT_DIFFICULTY) {
   const hpBase = DIFFICULTIES[difficulty]?.hpBase ?? DIFFICULTIES[DEFAULT_DIFFICULTY].hpBase;
-  return hpBase * Math.pow(1.19, Math.min(w, 22)) * Math.pow(1.155, Math.max(0, w - 22));
+  return hpBase * ENEMY_HP_MULT * Math.pow(1.19, Math.min(w, 22)) * Math.pow(1.155, Math.max(0, w - 22));
 }
-export function waveCount(w) { return Math.min(34, 8 + Math.floor(0.95 * w)); }
+export function waveCount(w) { return w === 1 ? 5 : Math.min(34, 8 + Math.floor(0.95 * w)); }
 // 生成等级地板（GDD §3.1）：相位对齐撞墙区间，封顶 Lv6（Lv7/8 只能靠合成）
 export function spawnFloor(w) { return w >= 40 ? 6 : w >= 30 ? 5 : w >= 22 ? 4 : w >= 15 ? 3 : w >= 8 ? 2 : 1; }
 
@@ -198,7 +202,7 @@ export const ENEMY_TYPES = {
   slime:    { hpMult: 1,    speed: 98,  goldMult: 1,   color: 0x87d64a, size: 24, from: 1 },
   runner:   { hpMult: 0.65, speed: 178, goldMult: 0.8, color: 0x55a8ff, size: 20, from: 3 },
   tank:     { hpMult: 3.3,  speed: 64,  goldMult: 2.5, color: 0x9aa17d, size: 28, armor: 0.2, from: 6 },
-  flyer:    { hpMult: 0.9,  speed: 96,  goldMult: 1.2, color: 0x8c57d9, size: 22, flying: true, from: 9 },
+  flyer:    { hpMult: 0.9,  speed: 96,  goldMult: 1.2, color: 0x8c57d9, size: 22, flying: true, from: 6 },
   splitter: { hpMult: 1.35, speed: 90,  goldMult: 1.5, color: 0xd6c453, size: 26, splits: true, from: 11 },
   priest:   { hpMult: 1.15, speed: 78,  goldMult: 1.7, color: 0x42d9c7, size: 25, healer: true, from: 13 },
   mini:     { hpMult: 0.35, speed: 115, goldMult: 0.3, color: 0x87d64a, size: 15, from: 99 },
@@ -212,7 +216,7 @@ export const LEAK_NORMAL = 1, LEAK_BOSS = 10;
 // 阶段色调（GDD §2）
 export const PHASES = [
   { from: 1, bg: 0x2a3d2f, ground: 0x35503b, name: t('phase.day') },
-  { from: 11, bg: 0x3d3226, ground: 0x4d4030, name: t('phase.dusk') },
+  { from: 8, bg: 0x3d3226, ground: 0x4d4030, name: t('phase.dusk') },
   { from: 21, bg: 0x252244, ground: 0x312d55, name: t('phase.night') },
   { from: 31, bg: 0x3a1e26, ground: 0x4a2830, name: t('phase.blood') },
 ];

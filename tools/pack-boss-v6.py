@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "art-source" / "enemies" / "generated-chatgpt-v5"
 OUTPUT_DIR = ROOT / "public" / "assets" / "enemies"
+LEFT_SOURCE = SOURCE_DIR / "boss-left-v7-alpha-raw.png"
 FRAME_SIZE = 160
 PADDING = 2
 BASELINE = 156
@@ -44,6 +45,39 @@ def sprite_runs(image: Image.Image) -> list[tuple[int, int]]:
     return runs
 
 
+def isolated_sprites(path: Path) -> list[Image.Image]:
+    source = Image.open(path).convert("RGBA")
+    sprites: list[Image.Image] = []
+    for index, (left, right) in enumerate(sprite_runs(source), start=1):
+        isolated = source.crop((left, 0, right, source.height))
+        bbox = solid_alpha_bbox(isolated)
+        if not bbox:
+            raise RuntimeError(f"{path.name} frame {index} is empty")
+        sprites.append(isolated.crop(bbox))
+    return sprites
+
+
+def normalize_generated_left(path: Path) -> list[Image.Image]:
+    sprites = isolated_sprites(path)
+    # One shared scale keeps the Boss mass stable while the stride changes width.
+    scale = min(TARGET_HEIGHT / max(sprite.height for sprite in sprites), 150 / max(sprite.width for sprite in sprites))
+    normalized: list[Image.Image] = []
+    for index, sprite in enumerate(sprites, start=1):
+        resized = sprite.resize(
+            (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+        cell = Image.new("RGBA", (FRAME_SIZE, FRAME_SIZE), (0, 0, 0, 0))
+        x = round((FRAME_SIZE - resized.width) / 2)
+        y = BASELINE - resized.height
+        cell.alpha_composite(resized, (x, y))
+        packed_bbox = solid_alpha_bbox(cell)
+        if not packed_bbox or packed_bbox[0] < 3 or packed_bbox[2] > FRAME_SIZE - 3:
+            raise RuntimeError(f"left frame {index} exceeds horizontal safe bounds: {packed_bbox}")
+        normalized.append(cell)
+    return normalized
+
+
 def normalize_front_left(path: Path) -> list[Image.Image]:
     source = Image.open(path).convert("RGBA")
     normalized: list[Image.Image] = []
@@ -72,16 +106,16 @@ def normalize_front_left(path: Path) -> list[Image.Image]:
 def build_frames() -> dict[str, list[Image.Image]]:
     return {
         "front": split_packed_strip(SOURCE_DIR / "boss-front-alpha.png"),
-        "left": split_packed_strip(SOURCE_DIR / "boss-left-alpha.png"),
+        "left": normalize_generated_left(LEFT_SOURCE),
         "front_left": normalize_front_left(SOURCE_DIR / "boss-front_left-alpha.png"),
     }
 
 
-def write_direction_strip(name: str, frames: list[Image.Image]) -> None:
+def write_direction_strip(filename: str, frames: list[Image.Image]) -> None:
     strip = Image.new("RGBA", (FRAME_SIZE * 5, FRAME_SIZE), (0, 0, 0, 0))
     for index, frame in enumerate(frames):
         strip.alpha_composite(frame, (index * FRAME_SIZE, 0))
-    strip.save(SOURCE_DIR / f"boss-{name}-v6-normalized.png", optimize=True)
+    strip.save(SOURCE_DIR / filename, optimize=True)
 
 
 def write_review(frames: dict[str, list[Image.Image]]) -> None:
@@ -95,6 +129,29 @@ def write_review(frames: dict[str, list[Image.Image]]) -> None:
         for frame_index, frame in enumerate(frames[direction]):
             review.paste(frame, (frame_index * FRAME_SIZE, row_index * FRAME_SIZE), frame)
     review.save(SOURCE_DIR / "enemy-boss-smooth-v6-review.png", optimize=True)
+
+
+def write_preview(frames: dict[str, list[Image.Image]]) -> None:
+    preview_frames: list[Image.Image] = []
+    for frame_index in range(5):
+        preview = Image.new("RGB", (FRAME_SIZE * 3, FRAME_SIZE), (28, 31, 39))
+        draw = ImageDraw.Draw(preview)
+        for y in range(0, preview.height, 16):
+            for x in range(0, preview.width, 16):
+                if (x // 16 + y // 16) % 2 == 0:
+                    draw.rectangle((x, y, x + 15, y + 15), fill=(36, 40, 50))
+        for direction_index, direction in enumerate(DIRECTIONS):
+            frame = frames[direction][frame_index]
+            preview.paste(frame, (direction_index * FRAME_SIZE, 0), frame)
+        preview_frames.append(preview)
+    preview_frames[0].save(
+        SOURCE_DIR / "enemy-boss-smooth-v6-preview.gif",
+        save_all=True,
+        append_images=preview_frames[1:],
+        duration=190,
+        loop=0,
+        disposal=2,
+    )
 
 
 def write_atlas(frames: dict[str, list[Image.Image]]) -> None:
@@ -134,8 +191,11 @@ def write_atlas(frames: dict[str, list[Image.Image]]) -> None:
 
 def main() -> None:
     frames = build_frames()
-    write_direction_strip("front_left", frames["front_left"])
+    write_direction_strip("boss-left-alpha.png", frames["left"])
+    write_direction_strip("boss-left-v7-normalized.png", frames["left"])
+    write_direction_strip("boss-front_left-v6-normalized.png", frames["front_left"])
     write_review(frames)
+    write_preview(frames)
     write_atlas(frames)
 
 

@@ -1,6 +1,7 @@
 // localStorage 存档
 const KEY = 'mt_save_v1';
 const SAVE_VERSION = 3;
+export const CURRENT_TUTORIAL_VERSION = 2;
 
 const DEFAULT = {
   v: SAVE_VERSION,
@@ -102,10 +103,10 @@ export function resetSave() {
 
 export function tier(s, id) { return s?.up?.[id] || 0; }
 
-// 已解锁元素：火冰电初始；通关第 5 波后解锁毒，通关第 10 波后解锁光。
+// 已解锁元素：火冰电初始；通关第 3 波后解锁毒，第 8 波起解锁光。
 export function unlockedElements(_s, wave = 1) {
   const list = ['fire', 'ice', 'lightning'];
-  if (wave > 5) list.push('poison');
-  if (wave > 10) list.push('light');
+  if (wave > 3) list.push('poison');
+  if (wave >= 8) list.push('light');
   return list;
 }

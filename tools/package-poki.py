@@ -5,13 +5,14 @@ from zipfile import ZIP_DEFLATED, ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 OUTPUT = ROOT / "merge-towers-poki.zip"
+EXCLUDED_SUFFIXES = {".map", ".md"}
 
 if not (DIST / "index.html").is_file():
     raise SystemExit("dist/index.html is missing; run npm run build first")
 
 with ZipFile(OUTPUT, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
     for path in sorted(DIST.rglob("*")):
-        if path.is_file():
+        if path.is_file() and path.suffix.lower() not in EXCLUDED_SUFFIXES:
             archive.write(path, path.relative_to(DIST).as_posix())
 
 with ZipFile(OUTPUT) as archive:
