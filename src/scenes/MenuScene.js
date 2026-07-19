@@ -48,7 +48,7 @@ export class MenuScene extends Phaser.Scene {
 
     const towerGap = wide ? 150 : 120;
     const towerStart = heroX - towerGap * 2;
-    const elems = Object.keys(ELEMENTS);
+    const elems = ['fire', 'ice', 'lightning', 'light', 'poison'];
     for (let i = 0; i < 5; i++) {
       const portraitHeights = [104, 126, 154, 126, 104];
       const targetHeight = wide ? (i === 2 ? 178 : 145) : portraitHeights[i];
@@ -57,10 +57,10 @@ export class MenuScene extends Phaser.Scene {
       this.tweens.add({ targets: [img, halo], y: '-=12', duration: 1300 + i * 130, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
     }
 
-    this.add.text(heroX, brandY - (wide ? 135 : 108), 'STRATEGY  ·  MERGE  ·  DEFEND', {
+    this.add.text(heroX, brandY - (wide ? 135 : 108), 'STRATEGY  ·  UPGRADE  ·  DEFEND', {
       fontFamily: 'Arial, sans-serif', fontSize: wide ? '22px' : '15px', color: '#75d6ad', fontStyle: 'bold', letterSpacing: 4,
     }).setOrigin(0.5);
-    this.add.text(heroX, brandY, 'MERGE\nTOWERS', {
+    this.add.text(heroX, brandY, 'UPGRADE\nTOWERS', {
       fontFamily: 'Arial Black, sans-serif', fontSize: wide ? '108px' : '78px', color: '#f5d675',
       align: 'center', stroke: '#18384a', strokeThickness: 10, lineSpacing: -18,
     }).setOrigin(0.5);

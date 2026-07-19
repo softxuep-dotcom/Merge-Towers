@@ -22,6 +22,11 @@ import { addTowerImage, fitTowerImageHeight } from '../textures.js';
 import { getLocale, LOCALES, setLocale, t, t as tr } from '../i18n.js';
 import { gameRunAnalysisMethods } from './gameRunAnalysis.js';
 import { gameVfxMethods } from './gameVfx.js';
+import { upgradeVfxMethods } from './upgradeVfx.js';
+import { TowerUpgradeOverlay } from '../ui/TowerUpgradeOverlay.js';
+import {
+  applyTowerUpgrade, frequencyRank, rangeRank, towerSkillName, upgradeChoicesFor, upgradeCostFor,
+} from '../towerUpgrades.js';
 
 // 地面路径（行进式像素描迹校准到石板路中轴线，2026-07-09）
 const PATH_PTS = [
@@ -51,6 +56,10 @@ const BOSS_AFFIX_KEYS = ['resilient', 'armored', 'twin', 'rage'];
 const LANDSCAPE_SIDEBAR_MIN = 360;
 const LANDSCAPE_SIDEBAR_MAX = 430;
 const BONUS_TOWER_LIMIT = 1;
+const WAVE_DURATION_MS = 12000;
+const INITIAL_SPLIT_INTERVAL = 5;
+const AUTO_UPGRADE_GOLD_PER_ENERGY = 60;
+const INITIAL_SPLIT_ORDER = Object.freeze(['fire', 'ice', 'poison', 'lightning', 'light']);
 const TOWER_EFFECT_KEYS = {
   fire: 'game.cardEffectFire',
   ice: 'game.cardEffectIce',
@@ -73,9 +82,10 @@ export class GameScene extends Phaser.Scene {
     const forceTutorial = import.meta.env.DEV && new URLSearchParams(window.location.search).has('tutorial');
     // 波 1 的合成教学每局都执行；首访状态只用于免费 2 倍速，不影响初始塔种。
     this.isFirstOnboarding = forceTutorial || (S.tutorialVersion || 0) < CURRENT_TUTORIAL_VERSION;
-    this.firstRunTutorial = true;
+    this.firstRunTutorial = false;
     // ---- 局内状态 ----
-    this.gold = Math.round((40 + 20 * tier(S, 'startGold')) * (S.coupon ? 1.5 : 1));
+    this.sourceEnergy = 0.5 + 0.1 * tier(S, 'startLv') + (S.coupon ? 0.5 : 0);
+    this.gold = 40 + 20 * tier(S, 'startGold');
     if (S.coupon) { S.coupon = false; writeSave(S); }
     this.displayGold = this.gold;
     this.goldRollTween = null;
@@ -130,6 +140,19 @@ export class GameScene extends Phaser.Scene {
     this.towers = [];
     this.nextTowerId = 1;
     this.burnZones = [];
+    this.effectZones = [];
+    this.nextEffectZoneId = 1;
+    this.sourcePerKill = 0;
+    this.sourceEarnedThisWave = 0;
+    this.upgradeChoiceOpen = false;
+    this.upgradeOverlay = new TowerUpgradeOverlay(this);
+    this.upgradePrevTimeScale = 1;
+    this.runElapsed = 0;
+    this.initialSplitIndex = 0;
+    this.nextInitialSplitAt = INITIAL_SPLIT_INTERVAL;
+    this.autoDraftCooldown = 0;
+    this.waveTimeLeft = WAVE_DURATION_MS / 1000;
+    this.daylightGuardUsed = false;
     this.waveCombatTime = 0;
     this.waveTowerDamage = new Map();
     this.leakStats = {};
@@ -161,12 +184,8 @@ export class GameScene extends Phaser.Scene {
 
     this.buildField();
     this.buildUI();
-    this.setupDrag();
+    this.setupOneMoveDrag();
     this.presetTowers();
-
-    // 自动化（局外解锁）
-    this.time.addEvent({ delay: 600, loop: true, callback: () => this.autoBuyTick() });
-    this.time.addEvent({ delay: 800, loop: true, callback: () => this.autoMergeTick() });
 
     // 开发工具：?editor=1 进入点击式路径编辑器（见 src/dev/pathEditor.js）
     if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('editor')) {
@@ -174,7 +193,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     Poki.gameplayStart();
-    this.startFirstRunTutorial();
+    this.startPrep();
   }
 
   // ================= 场景搭建 =================
@@ -301,8 +320,15 @@ export class GameScene extends Phaser.Scene {
     this.previewText = this.uiText(W / 2, 104, '', 18, '#d7e2ed').setOrigin(0.5).setAlign('center');
 
     // 底部面板（背景图模式半透明，露出城堡）
-    this.bottomPanel = this.add.rectangle(W / 2, 1197, W, 166, UI_THEME.ink, this.hasBg ? 0.9 : 0.97).setDepth(1000);
-    this.bottomAccent = this.add.rectangle(W / 2, 1114, W, 2, UI_THEME.primaryBright, 0.5).setDepth(1001);
+    this.bottomPanel = this.add.rectangle(W / 2, 1240, W, 80, UI_THEME.ink, this.hasBg ? 0.72 : 0.9).setDepth(1000);
+    this.bottomAccent = this.add.rectangle(W / 2, 1200, W, 2, UI_THEME.primaryBright, 0.42).setDepth(1001);
+    this.draftStatusBg = this.add.rectangle(302, 1237, 520, 56, UI_THEME.surfaceRaised, 0.76)
+      .setRounded(17).setStrokeStyle(1, UI_THEME.line, 0.38).setDepth(1001);
+    this.draftStatusText = this.uiText(302, 1228, '', 17, '#e8f1f6').setOrigin(0.5).setDepth(1003);
+    this.draftProgressBg = this.add.rectangle(62, 1254, 480, 5, 0x071018, 0.9)
+      .setOrigin(0, 0.5).setDepth(1002);
+    this.draftProgress = this.add.rectangle(62, 1254, 0, 5, UI_THEME.primaryBright, 0.92)
+      .setOrigin(0, 0.5).setDepth(1003);
 
     // 提前召唤
     this.callBtn = makeHudButton(this, W / 2, 1012, 370, 58, t('game.call'), {
@@ -314,13 +340,14 @@ export class GameScene extends Phaser.Scene {
     this.buyBtn = makeHudButton(this, 350, 1170, 390, 126, '', {
       simple: true, frame: 'button_primary', icon: 'build', iconSize: 54, iconX: -128, labelX: 22, fontSize: 27,
       radius: 22, shadowAlpha: 0.42,
-      onClick: () => this.buyTower(),
+      onClick: () => this.buyLevelOneTower(),
     }).setDepth(1002);
     this.buyPriceText = this.add.text(132, 0, '', {
       fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '31px',
       color: '#ffe47a', fontStyle: 'bold', stroke: '#142033', strokeThickness: 3,
     }).setOrigin(0.5);
     this.buyBtn.add(this.buyPriceText);
+    this.buyBtn.setVisible(false).setEnabled(false);
 
     // 回收区
     this.sellRect = new Phaser.Geom.Rectangle(18, 1114, 142, 112);
@@ -344,6 +371,11 @@ export class GameScene extends Phaser.Scene {
       simple: true, frame: 'button_secondary', icon: 'speed2x', iconSize: 30, iconX: -50, labelX: 18, fontSize: 18, radius: 14,
       onClick: () => this.toggleSpeed(),
     }).setDepth(1002);
+    this.sellSkin.setVisible(false);
+    this.sellZone.setVisible(false).disableInteractive();
+    this.sellIcon.setVisible(false);
+    this.sellText.setVisible(false);
+    this.giftBtn.setVisible(false).setEnabled(false);
     this.updateSpeedButton();
 
     if (typeof this.applyResponsiveLayout === 'function') this.applyResponsiveLayout();
@@ -422,15 +454,12 @@ export class GameScene extends Phaser.Scene {
   applyPortraitUI() {
     const bottom = this.layout.viewH;
     const safeBottom = Math.max(18, this.layout.safeBottom || 0);
-    const actionBottom = bottom - safeBottom;
-    const buyScale = 0.9;
-    const buyHalfH = ((this.buyBtn.height || 126) * buyScale) / 2;
-    const actionY = actionBottom - buyHalfH;
-    const callY = actionY - 124;
-    // 超长手机把地图下方的额外画布收进指令坞，避免出现像渲染空洞一样的黑带。
-    const panelTop = Math.min(H, callY - 48);
-    const panelH = bottom - panelTop;
+    const panelH = 74 + safeBottom;
+    const panelTop = bottom - panelH;
     const panelY = panelTop + panelH / 2;
+    const statusY = panelTop + 27;
+    const callY = panelTop - 42;
+    // 超长手机把地图下方的额外画布收进指令坞，避免出现像渲染空洞一样的黑带。
 
     this.sidebarBg.setVisible(false);
     this.sidebarDivider.setVisible(false);
@@ -476,17 +505,21 @@ export class GameScene extends Phaser.Scene {
     this.setUiRect(this.bottomPanel, W / 2, panelY, W, panelH);
     this.setUiRect(this.bottomAccent, W / 2, panelTop + 1, W, 2);
     this.setUi(this.callBtn, W / 2, callY);
-    this.setUi(this.buyBtn, 350, actionY).setScale(buyScale);
-    this.sellRect = new Phaser.Geom.Rectangle(24, actionY - 40, 104, 80);
-    this.setUiRect(this.sellZone, 76, actionY, 104, 80);
-    this.setUiRect(this.sellSkin, 76, actionY, 104, 80);
-    this.setUi(this.sellIcon, 76, actionY - 15).setDisplaySize(38, 38);
+    this.setUi(this.buyBtn, W / 2, bottom + 200).setVisible(false).setEnabled(false);
+    this.setUiRect(this.draftStatusBg, 302, statusY, 520, 54);
+    this.setUi(this.draftStatusText, 302, statusY - 7);
+    this.setUiRect(this.draftProgressBg, 62, statusY + 17, 480, 5).setOrigin(0, 0.5);
+    this.draftProgress.setPosition(this.layout.x(62), statusY + 17).setOrigin(0, 0.5);
+    this.sellRect = new Phaser.Geom.Rectangle(24, bottom + 120, 104, 80);
+    this.setUiRect(this.sellZone, 76, bottom + 160, 104, 80);
+    this.setUiRect(this.sellSkin, 76, bottom + 160, 104, 80);
+    this.setUi(this.sellIcon, 76, bottom + 145).setDisplaySize(38, 38);
     this.sellIconBaseScaleX = this.sellIcon.scaleX;
     this.sellIconBaseScaleY = this.sellIcon.scaleY;
-    this.setUi(this.sellText, 76, actionY + 16).setOrigin(0.5).setFontSize(15);
-    const speedY = actionBottom - 28;
+    this.setUi(this.sellText, 76, bottom + 176).setOrigin(0.5).setFontSize(15);
+    const speedY = statusY;
     this.setUi(this.giftBtn, 625, speedY - 58).setScale(0.8);
-    this.setUi(this.speedBtn, 625, speedY).setScale(0.8);
+    this.setUi(this.speedBtn, 625, speedY).setScale(0.72);
     this.buyBtn.label.setFontSize(26);
     this.buyPriceText.setFontSize(28);
     this.callBtn.label.setFontSize(18);
@@ -543,7 +576,11 @@ export class GameScene extends Phaser.Scene {
     this.setUi(this.previewText, sideCenter, 188).setOrigin(0.5).setFontSize(20);
 
     this.setUi(this.callBtn, sideCenter, 248);
-    this.setUi(this.buyBtn, sideCenter, 348).setScale(Math.min(1, (sidebarW - 28) / 390));
+    this.setUi(this.buyBtn, sideCenter, viewH + 180).setVisible(false).setEnabled(false);
+    this.setUiRect(this.draftStatusBg, sideCenter, 318, sidebarW - 34, 78);
+    this.setUi(this.draftStatusText, sideCenter, 304).setFontSize(17);
+    this.setUiRect(this.draftProgressBg, sideLeft + 12, 340, sidebarW - 72, 6).setOrigin(0, 0.5);
+    this.draftProgress.setPosition(this.layout.x(sideLeft + 12), 340).setOrigin(0, 0.5);
 
     const sellX = sideCenter;
     const sellY = 468;
@@ -594,40 +631,313 @@ export class GameScene extends Phaser.Scene {
   updateUI() {
     this.waveText.setText(`${this.wave} · ${DIFFICULTIES[this.difficulty].cn}`);
     this.heartText.setText(String(Math.max(0, this.baseHp)));
-    if (this.goldRollTween && this.gold < this.displayGold) {
-      this.goldRollTween.stop();
-      this.goldRollTween = null;
-    }
-    if (!this.goldRollTween) this.displayGold = this.gold;
-    this.goldText.setText(String(Math.floor(this.displayGold)));
+    this.goldText.setText(`${Math.floor(this.gold)}  ◆${this.sourceEnergy.toFixed(1)}`);
     this.diamondText.setText(String(this.S.diamonds + this.diamondsRun));
-    const cost = towerPrice(this.wave, this.waveBought);
-    const isBuilding = !this.pendingTowerDraft && !this.towerChoiceLayer;
-    if (this.pendingTowerDraft) this.buyBtn.label.setText(t('game.place'));
-    else if (this.towerChoiceLayer) this.buyBtn.label.setText(t('game.choose'));
-    else this.buyBtn.label.setText(t('game.build', { cost }).split('\n')[0]);
-    this.buyBtn.label.setX(isBuilding ? 10 : 38);
-    this.buyPriceText.setText(String(cost)).setVisible(isBuilding);
-    const afford = !this.pendingTowerDraft && !this.towerChoiceLayer && this.gold >= cost && this.slots.some(s => !s.tower);
-    this.buyBtn.setSkin(afford ? 'button_primary' : 'button_disabled');
-    const giftLeft = BONUS_TOWER_LIMIT - this.adGifts;
-    this.giftBtn.label.setText(t('game.gift', { left: Math.max(0, giftLeft), total: BONUS_TOWER_LIMIT }));
-    this.giftBtn.setEnabled(giftLeft > 0);
-    if (this.firstRunTutorial) {
-      this.giftBtn.setEnabled(false);
+    this.goldText.setText(`${Math.floor(this.gold)}  ◆${this.sourceEnergy.toFixed(1)}`);
+    this.buyPriceText.setVisible(false);
+    this.buyBtn.setVisible(false).setEnabled(false);
+    this.updateDraftHud();
+  }
+
+  updateDraftHud() {
+    if (!this.draftStatusText) return;
+    let label = '';
+    let progress = 0;
+    if (this.initialSplitIndex < INITIAL_SPLIT_ORDER.length) {
+      const elemKey = INITIAL_SPLIT_ORDER[this.initialSplitIndex];
+      const remaining = Math.max(0, Math.ceil(this.nextInitialSplitAt - this.runElapsed));
+      label = `首次裂变 ${this.initialSplitIndex + 1}/5 · ${ELEMENTS[elemKey].cn} · ${remaining}s`;
+      progress = 1 - Math.max(0, this.nextInitialSplitAt - this.runElapsed) / INITIAL_SPLIT_INTERVAL;
+    } else {
+      const candidates = this.autoUpgradeCandidates();
+      if (this.upgradeChoiceOpen || candidates.length) {
+        label = '升级已就绪 · 请选择 1 张卡片';
+        progress = 1;
+      } else {
+        const costs = this.towers.map(upgradeCostFor).filter(Number.isFinite);
+        const cost = costs.length ? Math.min(...costs) : Infinity;
+        const goldCost = cost * AUTO_UPGRADE_GOLD_PER_ENERGY;
+        if (Number.isFinite(cost)) {
+          label = `升级充能  ◆${this.sourceEnergy.toFixed(1)}/${cost}  或  ${Math.floor(this.gold)}/${goldCost}金币`;
+          progress = Math.max(this.sourceEnergy / cost, this.gold / goldCost);
+        } else {
+          label = '所有塔均已达到 Lv8';
+          progress = 1;
+        }
+      }
     }
+    this.draftStatusText.setText(label);
+    const maxWidth = this.layout?.landscape ? Math.max(0, this.layout.sidebarW - 72) : 480;
+    this.draftProgress.width = maxWidth * Phaser.Math.Clamp(progress, 0, 1);
   }
 
   // ================= 开局预置 =================
   presetTowers() {
-    const elem = Math.random() < 0.5 ? 'fire' : 'lightning';
-    this.tutorialElem = elem;
-    const a = this.slots[1], b = this.slots[2]; // 第一排中间相邻两格
-    this.tutorialTowerA = new Tower(this, a, elem, 1);
-    this.tutorialTowerB = new Tower(this, b, elem, 1);
-    a.tower = this.tutorialTowerA;
-    b.tower = this.tutorialTowerB;
-    this.towers.push(this.tutorialTowerA, this.tutorialTowerB);
+    const fixed = [
+      ['fire', 1], ['ice', 3], ['lightning', 5], ['light', 7], ['poison', 9],
+    ];
+    for (const [elem, index] of fixed) {
+      this.placeTower(this.slots[index], elem, 1, null, { animate: false });
+    }
+  }
+
+  buyLevelOneTower() {
+    if (this.over || this.dying || this.settingsOpen || this.isPaused || this.upgradeChoiceOpen) return false;
+    const free = this.slots.filter(slot => !slot.tower);
+    if (!free.length) {
+      toast(this, this.buyBtn.x, this.buyBtn.y - 130, t('game.full'), '#ffb0a2', 21, 2000);
+      return false;
+    }
+    const cost = towerPrice(this.wave, this.waveBought);
+    if (this.gold < cost) {
+      toast(this, this.buyBtn.x, this.buyBtn.y - 130, t('common.noGold'), '#ffb0a2', 21, 2000);
+      return false;
+    }
+    this.gold -= cost;
+    this.waveBought++;
+    this.bought++;
+    const elem = Phaser.Utils.Array.GetRandom(['fire', 'ice', 'lightning', 'light', 'poison']);
+    const slot = Phaser.Utils.Array.GetRandom(free);
+    const tower = this.placeTower(slot, elem, 1);
+    tower.lastUpgradeWave = 0;
+    Sfx.buy();
+    toast(this, slot.x, slot.y - 118, t('game.receivedLv1', { element: ELEMENTS[elem].cn }), this.hexColor(tower.color), 21, 1800);
+    this.updateUI();
+    return true;
+  }
+
+  enableTowerInteraction(tower) {
+    this.input.setDraggable(tower.c, true);
+    tower.c.on('pointerup', () => {
+      if (tower.dragging || this.time.now < (tower.suppressUpgradeClickUntil || 0)) return;
+      if (this.upgradeChoiceOpen) return;
+      if (this.initialSplitIndex < INITIAL_SPLIT_ORDER.length) {
+        const elemKey = INITIAL_SPLIT_ORDER[this.initialSplitIndex];
+        const remaining = Math.max(0, Math.ceil(this.nextInitialSplitAt - this.runElapsed));
+        toast(this, tower.slot.x, tower.slot.y - 115, `${ELEMENTS[elemKey].cn}裂变将在 ${remaining}s 后自动开启`, '#c8e8ff', 18, 1600);
+        return;
+      }
+      this.openTowerUpgrade(tower);
+    });
+  }
+
+  setupOneMoveDrag() {
+    this.input.dragDistanceThreshold = 12;
+
+    this.input.on('dragstart', (pointer, obj) => {
+      const tower = obj.towerRef;
+      const blocked = !tower || tower.hasMoved || this.over || this.dying
+        || this.settingsOpen || this.isPaused || this.upgradeChoiceOpen || this.pendingTowerDraft;
+      obj.oneMoveDragAllowed = !blocked;
+      if (blocked) {
+        if (tower?.hasMoved) toast(this, tower.slot.x, tower.slot.y - 112, t('game.towerMoveLocked'), '#aebfd0', 18, 1400);
+        return;
+      }
+      tower.dragging = true;
+      tower.setDraggingVisual(true);
+      obj.setDepth(2600);
+      this.showFreeSlots(true);
+    });
+
+    this.input.on('drag', (pointer, obj, dragX, dragY) => {
+      if (!obj.oneMoveDragAllowed) return;
+      obj.setPosition(dragX, dragY);
+    });
+
+    this.input.on('dragend', (pointer, obj) => {
+      const tower = obj.towerRef;
+      if (!tower || !obj.oneMoveDragAllowed) return;
+      obj.oneMoveDragAllowed = false;
+      tower.dragging = false;
+      tower.suppressUpgradeClickUntil = this.time.now + 220;
+      tower.setDraggingVisual(false);
+      this.showFreeSlots(false);
+
+      let nearest = null;
+      let nearestDistance = 96;
+      for (const slot of this.slots) {
+        if (slot.tower && slot !== tower.slot) continue;
+        const distance = Phaser.Math.Distance.Between(obj.x, obj.y + 8, slot.x, slot.y);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearest = slot;
+        }
+      }
+
+      if (!nearest || nearest === tower.slot || nearest.tower) {
+        tower.moveTo(tower.slot);
+        return;
+      }
+
+      tower.slot.tower = null;
+      nearest.tower = tower;
+      tower.moveTo(nearest);
+      tower.hasMoved = true;
+      tower.moveLockText = this.add.text(35, 8, '◆', {
+        fontFamily: 'Arial Black, sans-serif', fontSize: '13px', color: '#9fb0bf',
+        stroke: '#07111c', strokeThickness: 3,
+      }).setOrigin(0.5);
+      tower.c.add(tower.moveLockText);
+      toast(this, nearest.x, nearest.y - 112, t('game.towerMoved'), '#9fe8ff', 18, 1500);
+      this.updateUI();
+    });
+  }
+
+  beginUpgradePause() {
+    if (this.upgradeChoiceOpen) return;
+    this.upgradeChoiceOpen = true;
+    this.upgradePrevTimeScale = this.time.timeScale;
+    this.time.timeScale = 0;
+  }
+
+  openUpgradePicker() {
+    if (this.over || this.dying || this.settingsOpen || this.isPaused) return;
+    const eligible = this.towers.some(tower => {
+      const cost = upgradeCostFor(tower);
+      return Number.isFinite(cost) && tower.lastUpgradeWave !== this.wave && this.sourceEnergy + 1e-6 >= cost;
+    });
+    if (!eligible) {
+      toast(this, this.buyBtn.x, this.buyBtn.y - 130, t('game.needEnergy'), '#ffb0a2', 21, 2200);
+      return;
+    }
+    this.beginUpgradePause();
+    this.upgradeOverlay.showTowerPicker(
+      this.towers,
+      this.sourceEnergy,
+      tower => this.openTowerUpgrade(tower),
+      () => this.closeUpgradeOverlay(),
+    );
+  }
+
+  openTowerUpgrade(tower) {
+    const cost = upgradeCostFor(tower);
+    const goldCost = cost * AUTO_UPGRADE_GOLD_PER_ENERGY;
+    const canEnergy = this.sourceEnergy + 1e-6 >= cost;
+    const canGold = this.gold >= goldCost;
+    if (!Number.isFinite(cost) || (!canEnergy && !canGold)) {
+      if (!this.upgradeChoiceOpen) toast(this, tower.slot.x, tower.slot.y - 115, t('game.needEnergy'), '#ffb0a2', 20, 2000);
+      return;
+    }
+    this.beginUpgradePause();
+    const choices = upgradeChoicesFor(tower);
+    this.upgradeOverlay.showChoices(
+      tower,
+      choices,
+      choice => this.finishTowerUpgrade(tower, choice, canEnergy ? 'energy' : 'gold'),
+      () => this.closeUpgradeOverlay(),
+    );
+  }
+
+  finishTowerUpgrade(tower, choice, payment = 'energy') {
+    const cost = upgradeCostFor(tower);
+    const goldCost = cost * AUTO_UPGRADE_GOLD_PER_ENERGY;
+    if (!Number.isFinite(cost)) return;
+    if (payment === 'gold') {
+      if (this.gold < goldCost) return;
+      this.gold -= goldCost;
+    } else {
+      if (this.sourceEnergy + 1e-6 < cost) return;
+      this.sourceEnergy = Math.max(0, this.sourceEnergy - cost);
+    }
+    const oldLevel = tower.lv;
+    if (!applyTowerUpgrade(tower, choice)) return;
+    this.highestLv = Math.max(this.highestLv, tower.lv);
+    this.upgradeOverlay.destroy();
+    const ultimate = tower.lv === MAX_LV;
+    this.playUpgradeRiftFx(tower, { ultimate });
+    if (ultimate) {
+      this.playUltimateScreenFx(tower);
+      this.slowmoT = Math.max(this.slowmoT, 0.32);
+      this.banner(t('game.ultimateAwaken', { name: towerSkillName(tower) }));
+      Sfx.mergeTop();
+    } else {
+      Sfx.merge(tower.lv);
+      toast(this, tower.slot.x, tower.slot.y - 120, `Lv${oldLevel} → Lv${tower.lv}  ${choice.name}`, this.hexColor(tower.color), 21, 2200);
+    }
+    this.autoDraftCooldown = 0.45;
+    this.closeUpgradeOverlay();
+  }
+
+  autoUpgradeCandidates() {
+    if (this.initialSplitIndex < INITIAL_SPLIT_ORDER.length) return [];
+    const pool = [];
+    for (const tower of this.towers) {
+      const cost = upgradeCostFor(tower);
+      if (!Number.isFinite(cost)) continue;
+      const goldCost = cost * AUTO_UPGRADE_GOLD_PER_ENERGY;
+      const payment = this.sourceEnergy + 1e-6 >= cost ? 'energy' : this.gold >= goldCost ? 'gold' : null;
+      if (!payment) continue;
+      for (const choice of upgradeChoicesFor(tower)) pool.push({ tower, choice, cost, goldCost, payment });
+    }
+    return pool;
+  }
+
+  updateAutoUpgradeFlow() {
+    if (this.over || this.dying || this.settingsOpen || this.isPaused || this.upgradeChoiceOpen) return;
+    if (this.initialSplitIndex < INITIAL_SPLIT_ORDER.length) {
+      if (this.runElapsed + 1e-6 >= this.nextInitialSplitAt) this.openScheduledCoreSplit();
+      return;
+    }
+    if (this.autoDraftCooldown > 0) return;
+    const candidates = this.autoUpgradeCandidates();
+    if (candidates.length) this.openAutoUpgradeDraft(candidates);
+  }
+
+  openScheduledCoreSplit() {
+    const elemKey = INITIAL_SPLIT_ORDER[this.initialSplitIndex];
+    const tower = this.towers.find(item => item.elem === elemKey && item.lv === 1);
+    if (!tower) {
+      this.initialSplitIndex++;
+      this.nextInitialSplitAt += INITIAL_SPLIT_INTERVAL;
+      return;
+    }
+    this.beginUpgradePause();
+    this.upgradeOverlay.showChoices(
+      tower,
+      upgradeChoicesFor(tower),
+      choice => this.finishScheduledCoreSplit(tower, choice),
+      null,
+      { mandatory: true, subtitle: `第 ${this.initialSplitIndex + 1}/5 次首次裂变 · 本次免费` },
+    );
+  }
+
+  finishScheduledCoreSplit(tower, choice) {
+    const oldLevel = tower.lv;
+    if (!applyTowerUpgrade(tower, choice)) return;
+    this.highestLv = Math.max(this.highestLv, tower.lv);
+    this.initialSplitIndex++;
+    this.nextInitialSplitAt += INITIAL_SPLIT_INTERVAL;
+    this.playUpgradeRiftFx(tower, { ultimate: false });
+    Sfx.merge(tower.lv);
+    toast(this, tower.slot.x, tower.slot.y - 120, `Lv${oldLevel} → Lv${tower.lv}  ${choice.name}`, this.hexColor(tower.color), 21, 2200);
+    this.closeUpgradeOverlay();
+  }
+
+  openAutoUpgradeDraft(candidates = this.autoUpgradeCandidates()) {
+    if (!candidates.length) return;
+    const cards = Phaser.Utils.Array.Shuffle([...candidates]).slice(0, 4).map(entry => {
+      const elem = ELEMENTS[entry.tower.elem];
+      const pay = entry.payment === 'energy' ? `消耗 ◆${entry.cost}` : `消耗 ${entry.goldCost} 金币`;
+      return {
+        ...entry,
+        color: entry.choice.color,
+        icon: entry.choice.icon,
+        name: `${elem.cn} Lv${entry.tower.lv + 1} · ${entry.choice.name}`,
+        description: `${entry.choice.description}\n${pay}`,
+        badge: entry.choice.badge,
+      };
+    });
+    this.beginUpgradePause();
+    this.upgradeOverlay.showGlobalDraft(cards, card => {
+      this.finishTowerUpgrade(card.tower, card.choice, card.payment);
+    });
+  }
+
+  closeUpgradeOverlay() {
+    this.upgradeOverlay?.destroy();
+    if (this.upgradeChoiceOpen) this.time.timeScale = this.upgradePrevTimeScale || 1;
+    this.upgradeChoiceOpen = false;
+    this.updateUI();
   }
 
   startFirstRunTutorial() {
@@ -1028,13 +1338,13 @@ export class GameScene extends Phaser.Scene {
       event: t(eventKey),
     }));
     this.previewBg.setVisible(true);
-    this.callBtn.setVisible(true);
+    this.callBtn.setVisible(false);
     this.prepTimer = this.time.delayedCall(PREP_DURATION_MS, () => this.startWave(false));
     this.updateUI();
   }
 
   startWave(early) {
-    if (this.evolutionChoiceOpen) {
+    if (this.evolutionChoiceOpen || this.upgradeChoiceOpen) {
       this.prepTimer = this.time.delayedCall(300, () => this.startWave(early));
       return;
     }
@@ -1042,6 +1352,7 @@ export class GameScene extends Phaser.Scene {
     if (this.prepTimer) this.prepTimer.remove();
     this.waveGoldMult = early ? 1.1 : 1.0;
     this.holyHealThisWave = 0;
+    this.daylightGuardUsed = false;
     this.callBtn.setVisible(false);
     this.previewText.setText('');
     this.previewBg.setVisible(false);
@@ -1052,9 +1363,14 @@ export class GameScene extends Phaser.Scene {
     if (this.wave % 5 === 0) { Sfx.bossIn(); this.cameras.main.shake(350, 0.006); }
 
     const queue = this.pending.slice();
+    this.waveTimeLeft = WAVE_DURATION_MS / 1000;
+    this.sourceEarnedThisWave = 0;
+    this.sourcePerKill = queue.length > 0
+      ? (0.8 * this.waveGoldMult * (1 + 0.03 * tier(this.S, 'startLv'))) / queue.length
+      : 0;
     this.spawnLeft = queue.length;
-    const earlyMult = this.wave <= EARLY_WAVE_CUTOFF ? EARLY_WAVE_SPAWN_INTERVAL_MULT : 1;
-    const interval = Phaser.Math.Clamp(15 / queue.length, 0.35, 1.2) * earlyMult * 1000;
+    const earlyMult = this.wave <= EARLY_WAVE_CUTOFF ? Math.max(0.82, EARLY_WAVE_SPAWN_INTERVAL_MULT) : 1;
+    const interval = Phaser.Math.Clamp(10.5 / Math.max(1, queue.length), 0.18, 0.7) * earlyMult * 1000;
     let i = 0;
     this.spawnEvent = this.time.addEvent({
       delay: interval, repeat: queue.length - 1, startAt: interval - 200,
@@ -1071,6 +1387,8 @@ export class GameScene extends Phaser.Scene {
         this.spawnLeft--;
       },
     });
+    this.waveAdvanceEvent?.remove();
+    this.waveAdvanceEvent = this.time.delayedCall(WAVE_DURATION_MS, () => this.endWave());
   }
 
   previewIcons(list) {
@@ -1130,31 +1448,21 @@ export class GameScene extends Phaser.Scene {
         if (!this.lastStandLeaked) this.finishLastStand(true);
         return;
       }
-      this.endWave();
     }
   }
 
   async endWave() {
+    this.waveAdvanceEvent?.remove();
+    this.waveAdvanceEvent = null;
     this.waveState = 'idle';
     this.resonanceGoldMult = 1;
     this.waveBought = 0; // 波内价格热度重置
     this.holyHealThisWave = 0;
-    // 利息（GDD §5.3：5%/档，单波上限 50×档）
-    const it = tier(this.S, 'interest');
-    if (it > 0) {
-      const gain = Math.min(Math.floor(this.gold * 0.05 * it), 50 * it);
-      if (gain > 0) { this.gold += gain; toast(this, 380, 200, t('game.interest', { value: gain }), '#ffd34e', 24); }
-    }
+    const sourceTarget = 1 + 0.05 * tier(this.S, 'interest');
+    const sourceGain = Math.max(0, sourceTarget - this.sourceEarnedThisWave);
+    if (sourceGain > 0) this.sourceEnergy += sourceGain;
     const finished = this.wave;
     this.wave++;
-    if (this.wave === 4) {
-      this.banner(t('game.venomUnlock'));
-      toast(this, W / 2, 245, t('game.venomTip'), '#7ede55', 28);
-    }
-    if (this.wave === 8) {
-      this.banner(t('game.lightUnlock'));
-      toast(this, W / 2, 245, t('game.lightTip'), '#fff3c4', 28);
-    }
     // 里程碑钻石
     if (finished % 10 === 0) {
       this.diamondsRun += DIAMOND.milestone;
@@ -1226,12 +1534,16 @@ export class GameScene extends Phaser.Scene {
     this.enemies = this.enemies.filter(x => x !== e);
     if (this.over) { e.destroy(); return; }
     this.kills++;
-    // 金币（GDD §4.3）
-    const g = Math.max(1, Math.round(waveHp(e.spawnWave) * 0.1 * e.type.goldMult * e.rewardGoldMult * e.killGoldMult * this.waveGoldMult * this.resonanceGoldMult));
-    this.gold += g;
-    this.rollGoldTo(this.gold);
+    const gold = Math.max(1, Math.round(
+      waveHp(e.spawnWave) * 0.1 * e.type.goldMult * e.rewardGoldMult * e.killGoldMult * this.waveGoldMult,
+    ));
+    this.gold += gold;
+    const source = this.sourcePerKill + (e.elite ? 0.15 : 0) + (e.boss ? 0.4 : 0);
+    this.sourceEnergy += source;
+    this.sourceEarnedThisWave += source;
     this.burst(e.x, e.y, e.type.color, e.boss ? 40 : 12, e.boss ? 1.6 : 1);
-    this.coinFly(e.x, e.y, g);
+    this.coinFly(e.x, e.y, gold);
+    if (source >= 0.08) this.showDmg(e.x, e.y - 58, `◆${source.toFixed(1)}`, '#9fe8ff');
     if (e.boss) {
       const rewardDiamonds = DIAMOND.boss;
       this.diamondsRun += rewardDiamonds;
@@ -1264,17 +1576,30 @@ export class GameScene extends Phaser.Scene {
       const src = e.poisons.find(p => p.t > 0 && p.plague);
       const radius = src.plagueRadius || 95;
       const infected = [];
-      for (const o of this.enemies) {
-        if (!o.dead && Phaser.Math.Distance.Between(e.x, e.y, o.x, o.y) < radius) {
+      const spreadLimit = 3 + Math.floor(((src.sourceTower?.ranks?.range || 0) + 1) / 2);
+      for (const o of this.enemies.filter(o => !o.dead && Phaser.Math.Distance.Between(e.x, e.y, o.x, o.y) < radius).slice(0, spreadLimit)) {
           infected.push({ x: o.x, y: o.y });
           o.applyPoison(src.dps, 2, false, src.sourceTower, {
             branchEffects: false,
             sourceBonus: src.sourceBonus || 0,
           });
           o.killGoldMult = Math.max(o.killGoldMult || 1, src.goldMult || 1);
-        }
       }
       this.playPlagueBurstFx(e.x, e.y, radius, infected);
+    }
+    // 永燃：只有同时处在两片独立火区中的敌人才会在死亡时传播一层火区。
+    const eternalMarks = (e.eternalFireMarks || []).filter(mark => mark.expiresAt > this.time.now);
+    const eternalSource = eternalMarks.find(mark => eternalMarks.filter(other => other.sourceTower === mark.sourceTower).length >= 2);
+    if (eternalSource) {
+      this.addElementZone(e.x, e.y, {
+        radius: 100,
+        dps: eternalSource.dps,
+        duration: 2,
+        color: eternalSource.sourceTower.color,
+        sourceTower: eternalSource.sourceTower,
+        mode: 'fire',
+      });
+      this.playSkillProcParticles(eternalSource.sourceTower, e.x, e.y, 1.25);
     }
     e.destroy();
     this.updateUI();
@@ -1308,7 +1633,14 @@ export class GameScene extends Phaser.Scene {
     if (this.over || this.dying) return;
     this.leakStats[leakedType] = (this.leakStats[leakedType] || 0) + 1;
     if (this.lastStandActive) this.lastStandLeaked = true;
-    this.baseHp -= e.boss ? LEAK_BOSS : LEAK_NORMAL;
+    const guarded = !this.daylightGuardUsed && this.towers.some(tower => tower.elem === 'light' && tower.ultimate === 'daylight');
+    if (guarded) {
+      this.daylightGuardUsed = true;
+      toast(this, 560, 940, t('game.daylightGuard'), '#fff8dc', 24);
+      this.playSkillProcParticles(this.towers.find(tower => tower.elem === 'light' && tower.ultimate === 'daylight'), 560, 940, 1.4);
+    } else {
+      this.baseHp -= e.boss ? LEAK_BOSS : LEAK_NORMAL;
+    }
     Sfx.leak();
     this.vignette.setAlpha(0.28);
     this.tweens.add({ targets: this.vignette, alpha: 0, duration: 400 });
@@ -1654,6 +1986,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (lv > this.highestLv) this.highestLv = lv;
     this.ensureWaveTowerStat(t);
+    this.enableTowerInteraction(t);
     return t;
   }
 
@@ -3016,20 +3349,102 @@ export class GameScene extends Phaser.Scene {
   }
 
   plagueDamageMult(t) {
-    if (t.elem !== 'poison' || t.branch !== 'a' || t.lv < BRANCH_START_LV) return 1;
-    return branchTierValue(t.lv, PLAGUE.lv3DamageMult, PLAGUE.lv5DamageMult, PLAGUE.lv7DamageMult);
+    if (t.elem !== 'poison') return 1;
+    const poisoned = this.enemies.filter(enemy => !enemy.dead && enemy.poisons.some(p => p.t > 0)).length;
+    return t.ultimate === 'hive' ? 1 + Math.min(0.6, poisoned * 0.03) : 1;
   }
 
   holyAuraBonus(t) {
     let bonus = 0;
     for (const aura of this.towers) {
-      if (aura === t || aura.elem !== 'light' || aura.branch !== 'b' || aura.lv < BRANCH_START_LV) continue;
-      // v1.19：230→170，圣辉从"全队常驻"收敛为"罩 3~4 塔的站位决策"
+      if (aura === t || aura.elem !== 'light' || (aura.skill !== 'radiance' && aura.ultimate !== 'daylight')) continue;
       const d = Phaser.Math.Distance.Between(aura.slot.x, aura.slot.y, t.slot.x, t.slot.y);
-      const radius = branchTierValue(aura.lv, 140, 170, 170);
-      if (d <= radius) bonus += branchTierValue(aura.lv, 0.12, 0.2, 0.3);
+      const radius = 130 + 20 * rangeRank(aura);
+      const power = aura.skill === 'radiance'
+        ? [0.1, 0.14, 0.18, 0.22, 0.26, 0.3][frequencyRank(aura) || 0]
+        : 0;
+      if (d <= radius) bonus += power + (aura.ultimate === 'daylight' ? 0.2 : 0);
     }
     return Math.min(1, bonus);
+  }
+
+  hiveAttackMult(t) {
+    if (t.elem !== 'poison' || t.ultimate !== 'hive') return 1;
+    const poisoned = this.enemies.filter(enemy => !enemy.dead && enemy.poisons.some(p => p.t > 0)).length;
+    return 1 + Math.min(0.4, poisoned * 0.02);
+  }
+
+  damageEnemy(tower, enemy, damage, color = '#ffffff', opts = {}) {
+    if (!enemy || enemy.dead) return 0;
+    let mult = 1;
+    if (tower.ultimate === 'heatdeath' && (enemy.boss || enemy.hp / enemy.maxHp > 0.7 || enemy.hp / enemy.maxHp < 0.3)) mult *= 1.6;
+    if (tower.ultimate === 'finaljudgement' && enemy.boss) mult *= 1 + Math.min(0.54, Math.floor((1 - enemy.hp / enemy.maxHp) * 10) * 0.06);
+    if (tower.elem === 'poison') mult *= this.plagueDamageMult(tower);
+    const real = enemy.takeDamage(damage * mult, {
+      trueDmg: !!opts.trueDmg,
+      cause: opts.cause || 'hit',
+      sourceTower: tower,
+      sourceBonus: this.sourceBonusFor(tower, enemy),
+    });
+    if (opts.show !== false) this.showDmg(enemy.x, enemy.y - 40, real, color);
+    return real;
+  }
+
+  nearbyEnemies(x, y, radius, exclude = []) {
+    return this.enemies
+      .filter(enemy => !enemy.dead && !exclude.includes(enemy)
+        && Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y) <= radius + this.enemySize(enemy) * 0.5)
+      .sort((a, b) => (a.path.total - a.progress) - (b.path.total - b.progress));
+  }
+
+  addElementZone(x, y, { radius, dps, duration, color, sourceTower, mode = 'damage' }) {
+    const ring = this.add.circle(x, y, radius, color, 0.08).setStrokeStyle(2, color, 0.58).setDepth(2038);
+    const particles = this.add.particles(x, y, 'spark', {
+      lifespan: { min: 380, max: 720 }, frequency: 110, quantity: 1,
+      speed: { min: 8, max: 35 }, angle: { min: 210, max: 330 },
+      scale: { start: 0.42, end: 0 }, alpha: { start: 0.56, end: 0 },
+      tint: [color, 0xffffff], blendMode: Phaser.BlendModes.ADD,
+      emitZone: { type: 'random', source: new Phaser.Geom.Circle(0, 0, radius * 0.82) },
+    }).setDepth(2040);
+    this.effectZones.push({
+      id: this.nextEffectZoneId++, x, y, radius, dps, t: duration, tick: 0,
+      sourceTower, mode, ring, particles,
+    });
+  }
+
+  updateElementZones(dts) {
+    for (const zone of this.effectZones) {
+      zone.t -= dts;
+      zone.tick -= dts;
+      if (zone.tick <= 0) {
+        zone.tick = 0.25;
+        for (const enemy of this.nearbyEnemies(zone.x, zone.y, zone.radius)) {
+          if (zone.mode === 'poison') {
+            enemy.applyPoison(zone.dps, zone.sourceTower.ultimate === 'blackdeath' ? 3 : 1, false, zone.sourceTower, {
+              sourceBonus: this.sourceBonusFor(zone.sourceTower, enemy),
+            });
+          } else {
+            if (zone.mode === 'fire' && zone.sourceTower.ultimate === 'eternal') {
+              enemy.eternalFireMarks = (enemy.eternalFireMarks || [])
+                .filter(mark => mark.expiresAt > this.time.now && mark.id !== zone.id);
+              enemy.eternalFireMarks.push({
+                id: zone.id,
+                expiresAt: this.time.now + 350,
+                dps: zone.dps,
+                sourceTower: zone.sourceTower,
+              });
+            }
+            this.damageEnemy(zone.sourceTower, enemy, zone.dps * 0.25, '#ffffff', { trueDmg: zone.mode === 'fire', show: false });
+          }
+        }
+      }
+      if (zone.t <= 0) {
+        zone.particles.stop();
+        this.tweens.add({ targets: zone.ring, alpha: 0, duration: 180, onComplete: () => zone.ring.destroy() });
+        this.time.delayedCall(760, () => zone.particles.destroy());
+      }
+    }
+    this.effectZones = this.effectZones.filter(zone => zone.t > 0);
   }
 
   applyJudgementBuff(t) {
@@ -3058,7 +3473,284 @@ export class GameScene extends Phaser.Scene {
     this.updateUI();
   }
 
+  fireTowerUpgrade(t, target, { projectileLaunched = false } = {}) {
+    if (!projectileLaunched) {
+      t.resetCooldown();
+      t.recoil();
+      t.attackCount++;
+    }
+    const dmg = t.dmg;
+    const r = rangeRank(t);
+    const f = frequencyRank(t);
+    const skill = t.skill;
+    const sx = t.slot.x;
+    const sy = t.slot.y - 50;
+
+    if (t.elem === 'fire') {
+      const tx = target.x, ty = target.y;
+      const force = t.ultimate === 'supernova' && t.attackCount % 5 === 0;
+      if (skill === 'molten') {
+        const crit = force || Math.random() < [0.2, 0.26, 0.32, 0.38, 0.44, 0.5][f];
+        this.damageEnemy(t, target, dmg * 1.9 * (crit ? 2.5 : 1), crit ? '#ffe97a' : '#ffb199');
+        this.playFireBurstFx(tx, ty, crit ? 70 : 48, t.color);
+        if (crit) this.playSkillProcParticles(t, tx, ty, 1.25);
+        if (crit && r > 0) {
+          const radius = (40 + 20 * r) * (t.ultimate === 'supernova' ? 1.6 : 1);
+          for (const enemy of this.nearbyEnemies(tx, ty, radius, [target])) this.damageEnemy(t, enemy, dmg * (0.1 + 0.1 * r), '#ffb199');
+        }
+        return;
+      }
+      this.damageEnemy(t, target, dmg, '#ffb199');
+      if (!skill) return;
+      if (skill === 'blast') {
+        const radius = (62 + 20 * r) * (t.ultimate === 'supernova' ? 1.6 : 1);
+        for (const enemy of this.nearbyEnemies(tx, ty, radius, [target])) this.damageEnemy(t, enemy, dmg * (0.35 + 0.1 * r), '#ffb199');
+        this.playFireBurstFx(tx, ty, radius * 0.72, t.color);
+        if (force || Math.random() < [0.3, 0.5, 0.55, 0.6, 0.65, 0.7][f]) {
+          this.addElementZone(tx, ty, { radius: Math.max(46, radius * 0.55), dps: dmg * 0.35, duration: 2, color: t.color, sourceTower: t, mode: 'fire' });
+          this.playSkillProcParticles(t, tx, ty, 1);
+        }
+        return;
+      }
+      if (force || Math.random() < [0.25, 0.32, 0.39, 0.46, 0.53, 0.6][f]) {
+        const radius = (70 + 15 * r) * (t.ultimate === 'supernova' ? 1.6 : 1);
+        this.addElementZone(tx, ty, {
+          radius, dps: dmg * (0.25 + 0.08 * r),
+          duration: 3 + (t.ranks.power >= 3 ? 0.5 : 0) + (t.ranks.power >= 5 ? 0.5 : 0),
+          color: t.color, sourceTower: t, mode: 'fire',
+        });
+        this.playSkillProcParticles(t, tx, ty, 1);
+      }
+      return;
+    }
+
+    if (t.elem === 'ice') {
+      if (t.ultimate === 'iceage' && this.time.now - t.lastUltimateAt >= 8000) {
+        t.lastUltimateAt = this.time.now;
+        for (const enemy of this.enemies.filter(enemy => !enemy.dead
+          && Phaser.Math.Distance.Between(t.slot.x, t.slot.y, enemy.x, enemy.y) <= t.range)) enemy.applyFreeze(enemy.boss ? 0.35 : 1.2);
+        this.playFrostNovaFx(t.slot.x, t.slot.y, t.range, true);
+      }
+      this.damageEnemy(t, target, dmg, '#bfe8ff');
+      if (!target.dead) target.applySlow(70, 1.5, 15, 0);
+      if (!skill) return;
+      const repeat = t.ultimate === 'myriad' ? 1.6 : 1;
+      if (skill === 'mirror') {
+        const cadence = [4, 3, 3, 3, 2, 2][f];
+        if (t.attackCount % cadence === 0) {
+          const extra = 2 + (r >= 2 ? 1 : 0) + (r >= 4 ? 1 : 0);
+          for (const enemy of this.nearbyEnemies(target.x, target.y, 210, [target]).slice(0, extra)) {
+            this.lightBeam(target.x, target.y, enemy.x, enemy.y - 10);
+            this.damageEnemy(t, enemy, dmg * (0.45 + 0.08 * r) * repeat, '#bfe8ff');
+            if (!enemy.dead) enemy.applySlow(70, 1.5, 15, 0);
+          }
+          this.playSkillProcParticles(t, target.x, target.y, 1);
+        }
+        return;
+      }
+      const chance = skill === 'glacier' ? [0.25, 0.35, 0.4, 0.45, 0.5, 0.55][f] : [0.2, 0.3, 0.35, 0.4, 0.45, 0.5][f];
+      if (Math.random() >= chance) return;
+      const radius = (skill === 'glacier' ? 90 : 100) + 15 * r;
+      this.playFrostNovaFx(target.x, target.y, radius, t.lv >= 7);
+      this.playSkillProcParticles(t, target.x, target.y, 1.15);
+      for (const enemy of this.nearbyEnemies(target.x, target.y, radius)) {
+        if (skill === 'glacier') this.damageEnemy(t, enemy, dmg * (0.45 + 0.08 * r) * repeat, '#bfe8ff');
+        if (!enemy.dead) enemy.applySlow(70, 2, skill === 'glacier' ? 30 : 25, 3 * t.ranks.power);
+        if (skill === 'vortex' && !enemy.boss) enemy.progress = Math.max(0, enemy.progress - (25 + 5 * r));
+        if (t.ultimate === 'reverse') {
+          if (enemy.boss) {
+            enemy.applySlow(90, 2, 50, 20);
+          } else if (this.time.now - (enemy.lastReverseAt || -Infinity) >= 5000 && Math.random() < 0.12) {
+            enemy.lastReverseAt = this.time.now;
+            enemy.progress = Math.max(0, enemy.progress - enemy.path.total * 0.08);
+          }
+        }
+      }
+      return;
+    }
+
+    if (t.elem === 'lightning') {
+      const capacitorBurst = t.ultimate === 'capacitor' && t.chargeStreak >= 3;
+      const electricDmg = dmg * (capacitorBurst ? 2 : 1);
+      let targets = [target];
+      if (skill === 'chain' || !skill) {
+        const count = (skill ? 3 : 2) + (skill ? Math.floor((r + 1) / 2) : 0) + (t.ultimate === 'skynet' ? 6 : 0);
+        while (targets.length < count) {
+          const last = targets.at(-1);
+          const next = this.nearbyEnemies(last.x, last.y, 160, targets)[0];
+          if (!next) break;
+          targets.push(next);
+        }
+      }
+      this.playLightningChainFx(sx, sy, targets, t.visualBranch);
+      let triggered = skill === 'chain' && targets.length > 1;
+      targets.forEach((enemy, i) => {
+        const decay = t.ultimate === 'skynet' ? 1 : Math.max(0.35, 1 - i * Math.max(0.05, 0.2 - 0.03 * r));
+        this.damageEnemy(t, enemy, electricDmg * decay * (skill === 'nexus' ? 1.35 : 1), '#fff2a8');
+        if (skill === 'nexus' && !enemy.dead && Math.random() < [0.18, 0.28, 0.34, 0.4, 0.46, 0.52][f]) {
+          triggered = enemy.applyStun(0.8 + (t.ranks.power >= 3 ? 0.15 : 0) + (t.ranks.power >= 5 ? 0.15 : 0)) || triggered;
+          if (triggered) this.playStunRingFx(enemy.x, enemy.y);
+        }
+        if (t.ultimate === 'stormeye' && !enemy.dead) {
+          enemy.stormMarks ||= {};
+          enemy.stormMarks[t.id] = (enemy.stormMarks[t.id] || 0) + 1;
+          if (enemy.stormMarks[t.id] >= 8) {
+            enemy.stormMarks[t.id] = 0;
+            this.damageEnemy(t, enemy, electricDmg * 3.5, '#fff2a8');
+            this.playSkillProcParticles(t, enemy.x, enemy.y, 1.6);
+          }
+        }
+      });
+      if (skill === 'magstorm' && t.attackCount % [5, 4, 4, 3, 3, 2][f] === 0) {
+        triggered = true;
+        this.addElementZone(target.x, target.y, {
+          radius: 90 + 15 * r, dps: electricDmg * (0.4 + 0.08 * r),
+          duration: 2.5 + (t.ranks.power >= 3 ? 0.5 : 0), color: t.color, sourceTower: t,
+        });
+      }
+      if (triggered && t.ultimate === 'capacitor') {
+        t.cooldown -= 0.3;
+        t.chargeStreak = capacitorBurst ? 0 : Math.min(3, t.chargeStreak + 1);
+        if (capacitorBurst) this.playSkillProcParticles(t, target.x, target.y, 1.65);
+      }
+      if (triggered) this.playSkillProcParticles(t, target.x, target.y, 1.1);
+      return;
+    }
+
+    if (t.elem === 'light') {
+      this.lightBeam(sx, sy, target.x, target.y - 10);
+      if (skill === 'judgement') {
+        const threshold = [0.12, 0.16, 0.19, 0.22, 0.25, 0.28][t.ranks.power];
+        const eliteBonus = t.ultimate === 'finaljudgement' && target.elite ? 0.08 : 0;
+        if (!target.boss && target.hp / target.maxHp <= threshold + eliteBonus) {
+          this.showDmg(target.x, target.y - 50, tr('game.execute'), '#fff8dc');
+          target.takeDamage(target.hp + 1, { trueDmg: true, cause: 'execute', sourceTower: t });
+          this.playSkillProcParticles(t, target.x, target.y, 1.4);
+          return;
+        }
+      }
+      this.damageEnemy(t, target, dmg * (target.flying ? 1.3 : 1), '#fff8dc');
+      if (skill === 'refraction') {
+        const count = 2 + Math.floor((r + 1) / 2);
+        for (const enemy of this.nearbyEnemies(target.x, target.y, 190 + 15 * r, [target]).slice(0, count)) {
+          this.lightBeam(target.x, target.y, enemy.x, enemy.y - 10);
+          this.damageEnemy(t, enemy, dmg * (0.4 + 0.08 * r), '#fff8dc');
+        }
+      }
+      if (t.ultimate === 'sevenlight' && t.attackCount % 7 === 0) {
+        const enemies = this.enemies.filter(enemy => !enemy.dead && Phaser.Math.Distance.Between(t.slot.x, t.slot.y, enemy.x, enemy.y) <= t.range);
+        for (let i = 0; i < 7 && enemies.length; i++) {
+          const enemy = enemies[i % enemies.length];
+          this.lightBeam(enemy.x, enemy.y - 120, enemy.x, enemy.y);
+          this.damageEnemy(t, enemy, dmg * 0.7, '#fff8dc');
+        }
+        this.playSkillProcParticles(t, target.x, target.y, 1.5);
+      }
+      return;
+    }
+
+    this.damageEnemy(t, target, dmg * 0.35, '#9ef07a');
+    if (target.dead) return;
+    let poisonDps = dmg * this.plagueDamageMult(t);
+    if (t.ultimate === 'dissolve') poisonDps *= 1 + Math.min(0.4, target.armor * 0.5);
+    target.applyPoison(poisonDps, t.ultimate === 'blackdeath' ? 3 : 1, false, t, { sourceBonus: this.sourceBonusFor(t, target) });
+    if (skill === 'corrosion') {
+      const n = t.ranks.power;
+      target.applyCorrosion([0.08, 0.11, 0.14, 0.17, 0.2, 0.23][n], 5, [0.15, 0.2, 0.25, 0.3, 0.35, 0.4][n]);
+    }
+    if (skill === 'spores' && t.attackCount % [5, 4, 4, 3, 3, 2][f] === 0) {
+      this.addElementZone(target.x, target.y, {
+        radius: 80 + 15 * r, dps: dmg * (0.18 + 0.08 * r),
+        duration: 4 + (t.ranks.power >= 3 ? 0.5 : 0), color: t.color, sourceTower: t, mode: 'poison',
+      });
+      this.playSkillProcParticles(t, target.x, target.y, 1.15);
+    }
+    this.showDmg(target.x, target.y - 55, '☠', '#9ef07a');
+  }
+
+  launchElementProjectile(t, target) {
+    t.resetCooldown();
+    t.recoil();
+    t.attackCount++;
+
+    const sx = t.slot.x;
+    const sy = t.slot.y - 50;
+    const tx = target.x;
+    const ty = target.y - 10;
+    const heading = Phaser.Math.Angle.Between(sx, sy, tx, ty);
+    const headingDeg = Phaser.Math.RadToDeg(heading);
+    const isFire = t.elem === 'fire';
+    const isIce = t.elem === 'ice';
+    const texture = isFire ? 'fire_orb' : isIce ? 'ice_bolt' : 'bullet';
+    const trailTexture = isFire ? 'fire_ember' : isIce ? 'ice_speck' : 'spark';
+    const projectile = this.add.image(sx, sy, texture).setDepth(2050).setRotation(heading);
+    if (isFire) projectile.setScale(t.skill === 'molten' ? 1.34 : 1.12).setBlendMode(Phaser.BlendModes.ADD);
+    else if (isIce) projectile.setScale(1.18, 0.56).setBlendMode(Phaser.BlendModes.ADD);
+    else projectile.setScale(0.94, 1.18).setTint(t.color).setBlendMode(Phaser.BlendModes.ADD);
+
+    const trail = this.add.particles(0, 0, trailTexture, {
+      follow: projectile,
+      frequency: isFire ? 12 : isIce ? 34 : 18,
+      lifespan: isFire ? { min: 260, max: 480 } : isIce ? { min: 110, max: 220 } : { min: 300, max: 520 },
+      angle: { min: headingDeg + (isIce ? 172 : 145), max: headingDeg + (isIce ? 188 : 215) },
+      speed: isFire ? { min: 18, max: 65 } : isIce ? { min: 5, max: 22 } : { min: 4, max: 26 },
+      rotate: { min: -150, max: 150 },
+      scale: isFire ? { start: 0.82, end: 0.05 } : isIce ? { start: 0.38, end: 0.02 } : { start: 0.72, end: 0.12 },
+      alpha: { start: 0.94, end: 0 },
+      tint: isFire ? [0xffef9a, 0xff7a38, 0xe93622]
+        : isIce ? [0xffffff, 0xa7efff, 0x5db8ff]
+          : [0xe1ff8c, 0x82e34f, 0x339b38],
+      blendMode: Phaser.BlendModes.ADD,
+    }).setDepth(2049);
+
+    const distance = Phaser.Math.Distance.Between(sx, sy, tx, ty);
+    const duration = isFire
+      ? Phaser.Math.Clamp(distance / 1.15, 150, 440)
+      : isIce
+        ? Phaser.Math.Clamp(distance / 2.2, 85, 255)
+        : Phaser.Math.Clamp(distance / 1.45, 130, 380);
+    const motion = { q: 0 };
+    const perpX = -Math.sin(heading);
+    const perpY = Math.cos(heading);
+    this.tweens.add({
+      targets: motion,
+      q: 1,
+      duration,
+      ease: isFire ? 'Sine.InOut' : 'Linear',
+      onUpdate: () => {
+        const q = motion.q;
+        let side = 0;
+        if (isFire) side = Math.sin(Math.PI * q) * 22;
+        else if (!isIce) side = Math.sin(Math.PI * q * 4) * (14 - q * 5);
+        projectile.setPosition(
+          Phaser.Math.Linear(sx, tx, q) + perpX * side,
+          Phaser.Math.Linear(sy, ty, q) + perpY * side,
+        );
+        if (!isFire && !isIce) {
+          const pulse = 1 + Math.sin(q * Math.PI * 6) * 0.13;
+          projectile.setScale(0.94 * pulse, 1.18 / pulse).setRotation(heading + Math.sin(q * Math.PI * 4) * 0.26);
+        }
+      },
+      onComplete: () => {
+        trail.stop();
+        this.time.delayedCall(520, () => trail.destroy());
+        const impactX = projectile.x;
+        const impactY = projectile.y;
+        projectile.destroy();
+        if (this.over) return;
+        const resolvedTarget = !target.dead ? target : this.nearbyEnemies(impactX, impactY, 80)[0];
+        if (!resolvedTarget) return;
+        Sfx.hit();
+        this.fireTowerUpgrade(t, resolvedTarget, { projectileLaunched: true });
+      },
+    });
+  }
+
   fireTower(t, target) {
+    if (t.elem === 'fire' || t.elem === 'ice' || t.elem === 'poison') {
+      return this.launchElementProjectile(t, target);
+    }
+    return this.fireTowerUpgrade(t, target);
     t.resetCooldown();
     t.recoil();
     const dmg = t.dmg;
@@ -3516,7 +4208,7 @@ export class GameScene extends Phaser.Scene {
   update(time, delta) {
     this.ensureResponsiveLayout();
     this.syncTutorialBuildHighlight();
-    if (this.over || this.editorMode || this.isPaused || this.settingsOpen) return;
+    if (this.over || this.editorMode || this.isPaused || this.settingsOpen || this.upgradeChoiceOpen) return;
     let dts = (delta / 1000) * this.speedMult;
     if (this.tutorialForcedSlowmo) dts *= 0.5;
     if (this.lastStandActive) this.updateLastStand(delta / 1000);
@@ -3525,15 +4217,21 @@ export class GameScene extends Phaser.Scene {
       this.slowmoT -= delta / 1000;
       dts *= 0.3;
     }
-    if (this.evolutionChoiceOpen) dts *= 0.5;
     if (this.lastStandActive) dts *= 0.5;
     if (this.dying) return;
-    if (this.waveState === 'active') this.waveCombatTime += dts;
+    this.runElapsed += dts;
+    this.autoDraftCooldown = Math.max(0, this.autoDraftCooldown - dts);
+    if (this.waveState === 'active') {
+      this.waveCombatTime += dts;
+      this.waveTimeLeft = Math.max(0, this.waveTimeLeft - dts);
+      this.waveText.setText(`${this.wave} · ${DIFFICULTIES[this.difficulty].cn} · ${Math.ceil(this.waveTimeLeft)}s`);
+    }
+    this.updateAutoUpgradeFlow();
+    this.updateDraftHud();
 
     // 敌人
     for (const e of [...this.enemies]) e.update(dts);
     this.updateEnemySupport(dts);
-    this.maybeStartFirstRunMergeTutorial();
 
     // 光 Lv7 攻速 buff
     if (this.atkBuffT > 0) this.atkBuffT -= dts;
@@ -3543,8 +4241,8 @@ export class GameScene extends Phaser.Scene {
 
     // 塔开火
     for (const t of this.towers) {
-      if (t.dragging || (t.lv >= BRANCH_START_LV && !t.branch)) continue;
-      t.tickCooldown(dts, buff);
+      if (t.dragging) continue;
+      t.tickCooldown(dts, buff * this.hiveAttackMult(t));
       if (t.ready()) {
         const target = this.targetFor(t);
         if (target) this.fireTower(t, target);
@@ -3588,6 +4286,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     this.burnZones = this.burnZones.filter(z => z.t > 0);
+    this.updateElementZones(dts);
 
     // Boss 血条
     const bosses = this.enemies.filter(e => e.boss);
@@ -3607,4 +4306,5 @@ export class GameScene extends Phaser.Scene {
 }
 
 Object.assign(GameScene.prototype, gameRunAnalysisMethods);
+Object.assign(GameScene.prototype, upgradeVfxMethods);
 Object.defineProperties(GameScene.prototype, gameVfxMethods);

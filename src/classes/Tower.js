@@ -3,6 +3,7 @@ import {
   branchTierValue, towerDmg, towerRange,
 } from '../config.js';
 import { addTowerImage, applyTowerImage, fitTowerImageHeight } from '../textures.js';
+import { coreSkillDef, frequencyRank, powerMultiplier, rangeRank } from '../towerUpgrades.js';
 
 const BRANCH_MARKS = {
   fire: { a: '✹', b: '♨' },
@@ -20,7 +21,15 @@ export class Tower {
     this.elem = elem;
     this.lv = lv;
     this.id = scene.nextTowerId++;
-    this.branch = lv >= BRANCH_START_LV ? branch : null;
+    this.branch = null;
+    this.skill = null;
+    this.ranks = { range: 0, frequency: 0, power: 0 };
+    this.ultimate = null;
+    this.attackCount = 0;
+    this.lastUpgradeWave = 0;
+    this.lastUltimateAt = -Infinity;
+    this.chargeStreak = 0;
+    this.hasMoved = false;
     this.cooldown = 0;
     this.dragging = false;
     this.selfBuffT = 0;
@@ -36,7 +45,7 @@ export class Tower {
       .setVisible(false);
     this.targetSpriteHeight = 106 * (0.85 + lv * 0.07);
     this.spr = fitTowerImageHeight(
-      addTowerImage(scene, 0, -22, elem, lv, this.branch),
+      addTowerImage(scene, 0, -22, elem, lv, this.visualBranch),
       this.targetSpriteHeight,
     );
     this.badge = scene.add.circle(20, 8, 13, 0x1c1f2e, 0.92).setStrokeStyle(2, e.color);
@@ -44,13 +53,6 @@ export class Tower {
       fontFamily: 'Arial Black, sans-serif', fontSize: '16px', color: '#ffffff',
     }).setOrigin(0.5);
     const children = [this.shadow, this.highlightGlow];
-    if (lv >= BRANCH_START_LV) {
-      this.branchBadge = scene.add.circle(-22, 8, 13, 0x1c1f2e, this.branch ? 0.92 : 0.72)
-        .setStrokeStyle(2, this.branchAccent());
-      this.branchText = scene.add.text(-22, 8, this.branchLabel(), {
-        fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '16px', color: this.branch ? '#ffffff' : '#ffe97a',
-      }).setOrigin(0.5);
-    }
     // Lv8 常驻光环
     if (lv >= MAX_LV) {
       this.aura = scene.add.image(0, -20, 'glow').setScale(2.6).setTint(e.color).setAlpha(0.8);
@@ -58,33 +60,35 @@ export class Tower {
       scene.tweens.add({ targets: this.aura, scale: 3.1, alpha: 0.5, duration: 800, yoyo: true, repeat: -1 });
     }
     children.push(this.spr, this.badge, this.lvText);
-    if (lv >= BRANCH_START_LV) children.push(this.branchBadge, this.branchText);
     this.c = scene.add.container(slot.x, slot.y - 8, children);
     this.c.setDepth(slot.y);
     // The painted crystal extends well above the base. Keep the entire visible
     // tower inside the hit area so grabbing the crystal works on touch screens.
     this.c.setSize(112, 180);
     this.c.setInteractive({ useHandCursor: true });
-    scene.input.setDraggable(this.c);
     this.c.towerRef = this;
   }
 
-  get dmg() { return towerDmg(this.elem, this.lv); }
-  get range() { return towerRange(this.lv) * (TOWER_RANGE_MULT[this.elem] || 1); }
+  get dmg() { return towerDmg(this.elem, this.lv) * powerMultiplier(this); }
+  get range() { return towerRange(this.lv) * (TOWER_RANGE_MULT[this.elem] || 1) * (1 + 0.06 * rangeRank(this)); }
   get rate() {
-    const branchMult = this.elem === 'fire' && this.branch === 'b' && this.lv >= BRANCH_START_LV
-      ? branchTierValue(
-          this.lv,
-          FIRE_BRANCH_BALANCE.moltenRateMult.lv3,
-          FIRE_BRANCH_BALANCE.moltenRateMult.lv5,
-          FIRE_BRANCH_BALANCE.moltenRateMult.lv7,
-        )
-      : 1;
-    return ELEMENTS[this.elem].rate * branchMult;
+    const branchMult = this.elem === 'fire' && this.skill === 'molten' ? 0.8 : 1;
+    return ELEMENTS[this.elem].rate * branchMult * (1 + 0.08 * frequencyRank(this));
   }
   get goldMult() { return 1; }
   get color() { return ELEMENTS[this.elem].color; }
   get branchDef() { return this.branch ? TOWER_BRANCHES[this.elem]?.[this.branch] : null; }
+  get visualBranch() {
+    if (!this.skill) return null;
+    const defs = {
+      fire: { blast: 'a', molten: 'b', scorched: 'a' },
+      ice: { glacier: 'a', vortex: 'b', mirror: 'a' },
+      lightning: { chain: 'a', nexus: 'b', magstorm: 'a' },
+      poison: { plague: 'a', corrosion: 'b', spores: 'a' },
+      light: { judgement: 'a', radiance: 'b', refraction: 'a' },
+    };
+    return defs[this.elem]?.[this.skill] || 'a';
+  }
 
   // 攻击间隔计时；buffMult = 光 Lv7 全场攻速 buff
   tickCooldown(dts, buffMult) {
@@ -96,16 +100,36 @@ export class Tower {
   resetCooldown() { this.cooldown = 1; }
 
   branchLabel() {
-    return BRANCH_MARKS[this.elem]?.[this.branch] || '?';
+    return coreSkillDef(this.elem, this.skill)?.icon || '?';
   }
 
   branchAccent() {
-    return BRANCH_ACCENTS[this.branch] || this.color;
+    return BRANCH_ACCENTS[this.visualBranch] || this.color;
   }
 
   refreshVisual() {
-    applyTowerImage(this.spr, this.scene, this.elem, this.lv, this.branch);
+    applyTowerImage(this.spr, this.scene, this.elem, this.lv, this.visualBranch);
     fitTowerImageHeight(this.spr, this.targetSpriteHeight);
+  }
+
+  refreshLevelVisual() {
+    this.targetSpriteHeight = 106 * (0.85 + this.lv * 0.07);
+    this.lvText.setText(String(this.lv));
+    this.refreshVisual();
+    if (this.skill && !this.branchBadge) {
+      this.branchBadge = this.scene.add.circle(-22, 8, 13, 0x1c1f2e, 0.92).setStrokeStyle(2, this.branchAccent());
+      this.branchText = this.scene.add.text(-22, 8, this.branchLabel(), {
+        fontFamily: 'Arial, "Microsoft YaHei", sans-serif', fontSize: '16px', color: '#ffffff',
+      }).setOrigin(0.5);
+      this.c.add([this.branchBadge, this.branchText]);
+    }
+    if (this.branchText) this.branchText.setText(this.branchLabel());
+    if (this.branchBadge) this.branchBadge.setStrokeStyle(2, this.branchAccent());
+    if (this.lv >= MAX_LV && !this.aura) {
+      this.aura = this.scene.add.image(0, -20, 'glow').setScale(2.6).setTint(this.color).setAlpha(0.8);
+      this.c.addAt(this.aura, 2);
+      this.scene.tweens.add({ targets: this.aura, scale: 3.1, alpha: 0.5, duration: 800, yoyo: true, repeat: -1 });
+    }
   }
 
   setBranch(branch) {

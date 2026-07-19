@@ -1,11 +1,13 @@
 import { t } from './i18n.js';
 
-// 全部平衡数值集中在此，对应 GDD-MergeTowers.md
+// 全部平衡数值集中在此，对应 GDD-UpgradeTowers-Review.md
 export const W = 720, H = 1280;
 export const MAX_LV = 8;
 export const DEFAULT_DIFFICULTY = 'easy';
 export const ENEMY_HP_MULT = 1.05;
-export const PREP_DURATION_MS = 2000;
+// Waves are clock-driven now. Keep only a tiny reveal beat between waves so the
+// next group arrives on schedule instead of waiting for the field to be clear.
+export const PREP_DURATION_MS = 180;
 export const EARLY_WAVE_CUTOFF = 5;
 export const EARLY_WAVE_SPAWN_INTERVAL_MULT = 0.6;
 export const DIFFICULTIES = {
@@ -13,12 +15,9 @@ export const DIFFICULTIES = {
   normal: { key: 'normal', cn: t('difficulty.normal'), hpBase: 25, color: 0xffd34e },
   hard:   { key: 'hard',   cn: t('difficulty.hard'), hpBase: 29, color: 0xff7a7a },
 };
-// 分段伤害增长（v1.21 定版）：Lv1–3 幼年期 1.9，Lv4–8 段 2.0。
-// Lv8 总量 ≈ base×115.5（v1.20 为 158，原始 2.1^7=180）。
-// 注意：后期段=2.0 时合成的裸 DPS 收益恰好归零（合成塔=两塔之和），
-// 合成动机完全转移到 塔位经济/里程碑/冲击共鸣/射程——设计上有意为之。
-export const DMG_GROWTH_EARLY = 1.9; // Lv1–3
-export const DMG_GROWTH_LATE = 2.0;  // Lv4–8
+// 固定五塔的基础等级成长保持温和，主要强度来自每级卡片决策。
+export const DMG_GROWTH_EARLY = 1.35;
+export const DMG_GROWTH_LATE = 1.35;
 
 // 元素定义（GDD §3.2 / §3.3）
 export const ELEMENTS = {
@@ -62,16 +61,14 @@ export const TOWER_BRANCHES = {
 };
 
 export function towerDmg(elem, lv) {
-  const early = Math.pow(DMG_GROWTH_EARLY, Math.min(lv, 3) - 1);
-  const late = Math.pow(DMG_GROWTH_LATE, Math.max(0, lv - 3));
-  return ELEMENTS[elem].base * early * late;
+  return ELEMENTS[elem].base * Math.pow(DMG_GROWTH_EARLY, Math.max(0, lv - 1));
 }
 // 等级伤害系数（与元素无关），供模拟器/展示用
 export function dmgFactor(lv) {
   return towerDmg('fire', lv) / ELEMENTS.fire.base;
 }
 export function towerRange(lv) {
-  return 200 * (1 + 0.1 * Math.floor((lv - 1) / 2));
+  return 200 * (1 + 0.05 * Math.floor(lv / 2));
 }
 
 export const TOWER_RANGE_MULT = {
@@ -207,7 +204,7 @@ export function waveHp(w, difficulty = DEFAULT_DIFFICULTY) {
   const hpBase = DIFFICULTIES[difficulty]?.hpBase ?? DIFFICULTIES[DEFAULT_DIFFICULTY].hpBase;
   return hpBase * ENEMY_HP_MULT * Math.pow(1.19, Math.min(w, 22)) * Math.pow(1.155, Math.max(0, w - 22));
 }
-export function waveCount(w) { return w === 1 ? 5 : Math.min(34, 8 + Math.floor(0.95 * w)); }
+export function waveCount(w) { return w === 1 ? 9 : Math.min(54, 12 + Math.floor(1.3 * w)); }
 // 生成等级地板（GDD §3.1）：相位对齐撞墙区间，封顶 Lv6（Lv7/8 只能靠合成）
 export function spawnFloor(w) { return w >= 40 ? 6 : w >= 30 ? 5 : w >= 22 ? 4 : w >= 15 ? 3 : w >= 8 ? 2 : 1; }
 
@@ -261,8 +258,6 @@ export const UPGRADES = [
   { id: 'startGold', cn: t('upgrade.startGold'), desc: t('upgrade.startGoldDesc'), tiers: 10, cost: n => 8 + n * 5 },
   { id: 'baseArmor', cn: t('upgrade.baseArmor'), desc: t('upgrade.baseArmorDesc'), tiers: 5, cost: n => 10 + n * 8 },
   { id: 'interest', cn: t('upgrade.interest'), desc: t('upgrade.interestDesc'), tiers: 3, cost: n => 15 + n * 15 },
-  { id: 'autoBuy', cn: t('upgrade.autoBuy'), desc: t('upgrade.autoBuyDesc'), tiers: 1, cost: () => 60 },
-  { id: 'autoMerge', cn: t('upgrade.autoMerge'), desc: t('upgrade.autoMergeDesc'), tiers: 1, cost: () => 90 },
   { id: 'speed2x', cn: t('upgrade.speed2x'), desc: t('upgrade.speed2xDesc'), tiers: 1, cost: () => 80 },
 ];
 

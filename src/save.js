@@ -1,7 +1,7 @@
 // localStorage 存档
 const KEY = 'mt_save_v1';
 const SAVE_VERSION = 3;
-export const CURRENT_TUTORIAL_VERSION = 2;
+export const CURRENT_TUTORIAL_VERSION = 3;
 
 const DEFAULT = {
   v: SAVE_VERSION,
@@ -12,7 +12,7 @@ const DEFAULT = {
   tutorialVersion: 0,  // 已完成的教学版本
   up: {},           // 升级档位 { id: tier }
   lastSeen: 0,      // 离线结算时间戳
-  coupon: false,    // 下局开局金币 +50% 券
+  coupon: false,    // 下局开局额外源能 +0.5 券
   muted: false,
   adDiamondDay: '', // 当日看广告领钻计数
   adDiamondCount: 0,
@@ -104,9 +104,4 @@ export function resetSave() {
 export function tier(s, id) { return s?.up?.[id] || 0; }
 
 // 已解锁元素：火冰电初始；通关第 3 波后解锁毒，第 8 波起解锁光。
-export function unlockedElements(_s, wave = 1) {
-  const list = ['fire', 'ice', 'lightning'];
-  if (wave > 3) list.push('poison');
-  if (wave >= 8) list.push('light');
-  return list;
-}
+export function unlockedElements() { return ['fire', 'ice', 'lightning', 'light', 'poison']; }

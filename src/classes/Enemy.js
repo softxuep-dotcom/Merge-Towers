@@ -86,6 +86,7 @@ export class Enemy {
     this.hardControlImmuneT = 0;
     this.corrodedT = 0;
     this.corrosionPct = 0;
+    this.corrosionArmorPct = 0;
     this.poisons = []; // {dps, t, lv7, goldMult, plague, plagueRadius, sourceBonus, sourceTower}
     this.bobPhase = Math.random() * Math.PI * 2;
 
@@ -214,8 +215,9 @@ export class Enemy {
     return true;
   }
 
-  applyCorrosion(pct, duration = 5) {
+  applyCorrosion(pct, duration = 5, armorShred = 0) {
     this.corrosionPct = Math.max(this.corrosionPct || 0, pct);
+    this.corrosionArmorPct = Math.max(this.corrosionArmorPct || 0, armorShred);
     this.corrodedT = Math.max(this.corrodedT || 0, duration);
   }
 
@@ -224,13 +226,12 @@ export class Enemy {
     const goldMult = sourceTower?.goldMult || 1;
     const sourceBonus = opts.sourceBonus || 0;
     const branchEffects = opts.branchEffects !== false;
-    const poisonBranch = branchEffects && sourceTower?.elem === 'poison' && sourceTower.lv >= BRANCH_START_LV ? sourceTower.branch : null;
-    const plague = poisonBranch === 'a';
-    const plagueRadius = plague
-      ? branchTierValue(sourceTower.lv, PLAGUE.lv3SpreadRadius, PLAGUE.lv5SpreadRadius, PLAGUE.lv7SpreadRadius)
-      : 0;
-    if (poisonBranch === 'b') {
-      this.applyCorrosion(branchTierValue(sourceTower.lv, 0.15, 0.3, 0.5), 5);
+    const poisonBranch = branchEffects && sourceTower?.elem === 'poison' ? sourceTower.skill : null;
+    const plague = poisonBranch === 'plague';
+    const plagueRadius = plague ? 90 + 20 * (sourceTower.ranks?.range || 0) : 0;
+    if (poisonBranch === 'corrosion') {
+      const n = sourceTower.ranks?.power || 0;
+      this.applyCorrosion([0.08, 0.11, 0.14, 0.17, 0.2, 0.23][n], 5, [0.15, 0.2, 0.25, 0.3, 0.35, 0.4][n]);
     }
     const stack = { dps, t: 5, lv7, goldMult, plague, plagueRadius, sourceBonus, sourceTower };
     const ownerOf = tower => {
@@ -274,7 +275,8 @@ export class Enemy {
       return 0;
     }
     const amp = 1 + Math.min(1, Math.max(0, (this.corrodedT > 0 ? this.corrosionPct : 0) + (sourceBonus || 0)));
-    const real = (trueDmg ? dmg : dmg * (1 - this.armor)) * amp;
+    const effectiveArmor = Math.max(0, this.armor - (this.corrodedT > 0 ? this.corrosionArmorPct : 0));
+    const real = (trueDmg ? dmg : dmg * (1 - effectiveArmor)) * amp;
     const applied = Math.max(0, Math.min(this.hp - this.minHp, real));
     this.hp -= applied;
     if (this.scene.recordTowerDamage) this.scene.recordTowerDamage(sourceTower, applied);

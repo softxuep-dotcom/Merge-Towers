@@ -1,4 +1,5 @@
-import { ELEMENTS, TOWER_BRANCHES, towerPrice } from '../config.js';
+import { ELEMENTS } from '../config.js';
+import { towerSkillName } from '../towerUpgrades.js';
 import { t, t as tr } from '../i18n.js';
 
 const TYPE_CN = {
@@ -26,15 +27,6 @@ export const gameRunAnalysisMethods = {
         key: 'low_highest_lv',
         text: t('analysis.level', { wave, level: this.highestLv }),
         upgradeId: 'startLv',
-      });
-    }
-
-    const freeSlots = this.slots.filter(s => !s.tower).length;
-    if (freeSlots > 0 && this.gold >= towerPrice(this.wave, 0)) {
-      candidates.push({
-        key: 'idle_gold_slots',
-        text: t('analysis.slots', { wave, count: freeSlots }),
-        upgradeId: 'startGold',
       });
     }
 
@@ -137,9 +129,9 @@ export const gameRunAnalysisMethods = {
   },
 
   towerDpsLabel(stat) {
-    const t = stat.tower;
-    const branchName = t.branch ? TOWER_BRANCHES[t.elem]?.[t.branch]?.cn : '';
-    return `${ELEMENTS[t.elem].cn}${branchName ? `·${branchName}` : ''} Lv${t.lv}${stat.sold ? tr('analysis.sold') : ''}`;
+    const tower = stat.tower;
+    const skillName = towerSkillName(tower);
+    return `${ELEMENTS[tower.elem].cn}${skillName ? `·${skillName}` : ''} Lv${tower.lv}${stat.sold ? tr('analysis.sold') : ''}`;
   },
 
   buildWaveDpsSummary() {
