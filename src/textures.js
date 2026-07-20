@@ -618,6 +618,203 @@ export function generateTextures(scene) {
   drawCrystal(g, 45, 4, 50, 16, 0x7fd8ff);
   g.generateTexture('base', 90, 110);
 
+  generateSkillVfxTextures(g);
+  generateBeamTextures(scene);
+  generateVfxNoiseTexture(scene);
   g.destroy();
+}
+
+function generateSkillVfxTextures(g) {
+  g.clear();
+  g.lineStyle(5, 0xffffff, 1);
+  g.strokeCircle(64, 64, 58);
+  g.lineStyle(2, 0xffffff, 0.5);
+  g.strokeCircle(64, 64, 49);
+  g.generateTexture('fx_ring', 128, 128);
+
+  g.clear();
+  g.fillStyle(0xffffff, 1);
+  g.fillPoints(p([[12, 0], [15, 8], [24, 12], [15, 15], [12, 24], [9, 15], [0, 12], [9, 9]]), true);
+  g.fillCircle(12, 12, 4);
+  g.generateTexture('holy_mote', 24, 24);
+
+  g.clear();
+  g.fillStyle(0xffffff, 1);
+  g.fillCircle(6, 8, 5);
+  g.fillTriangle(3, 5, 9, 5, 6, 0);
+  g.generateTexture('poison_drop', 12, 13);
+
+  g.clear();
+  g.fillStyle(0xffffff, 0.32);
+  g.fillCircle(8, 8, 7);
+  g.lineStyle(2, 0xffffff, 0.95);
+  g.strokeCircle(8, 8, 6);
+  g.fillStyle(0xffffff, 0.9);
+  g.fillCircle(5, 5, 2);
+  g.generateTexture('poison_bubble', 16, 16);
+
+  const drawVenomFlask = (key, dark, liquid, bright, branch) => {
+    g.clear();
+    g.fillStyle(0x5a371c, 1);
+    g.fillRoundedRect(17, 0, 10, 7, 2);
+    g.fillStyle(0xe9fff0, 0.26);
+    g.fillRoundedRect(14, 6, 16, 12, 4);
+    g.fillRoundedRect(5, 13, 34, 29, 12);
+    g.lineStyle(2.4, 0xe9fff0, 0.96);
+    g.strokeRoundedRect(14, 6, 16, 12, 4);
+    g.strokeRoundedRect(5, 13, 34, 29, 12);
+    g.fillStyle(dark, 0.98);
+    g.fillRoundedRect(7, 23, 30, 17, 9);
+    g.fillStyle(liquid, 1);
+    g.fillEllipse(22, 31, 29, 17);
+    g.fillStyle(bright, 0.96);
+    g.fillEllipse(16, 27, 9, 7);
+    g.fillCircle(28, 34, 3);
+    g.fillStyle(0xffffff, 0.72);
+    g.fillRoundedRect(10, 16, 4, 12, 2);
+    if (branch === 'plague') {
+      g.fillStyle(0xa6d35f, 0.9);
+      g.fillCircle(18, 34, 2.5);
+      g.fillCircle(28, 27, 2);
+    } else if (branch === 'corrosion') {
+      g.lineStyle(1.6, 0x6b8117, 1);
+      g.lineBetween(12, 35, 31, 24);
+      g.lineBetween(20, 39, 29, 21);
+    } else {
+      g.lineStyle(1.2, 0xdfff9b, 0.86);
+      g.strokeCircle(22, 31, 7);
+    }
+    g.generateTexture(key, 44, 44);
+  };
+  drawVenomFlask('venom_flask', 0x1e5b31, 0x5bd84f, 0xd8ff88, 'spores');
+  drawVenomFlask('venom_flask_plague', 0x263d29, 0x78558f, 0xa6d35f, 'plague');
+  drawVenomFlask('venom_flask_corrosion', 0x647d18, 0xc9f24b, 0xffffc5, 'corrosion');
+
+  g.clear();
+  g.fillStyle(0xffffff, 0.2);
+  g.fillEllipse(15, 22, 27, 15);
+  g.fillEllipse(34, 17, 35, 21);
+  g.fillEllipse(49, 23, 19, 13);
+  g.fillStyle(0xffffff, 0.4);
+  g.fillEllipse(27, 15, 22, 11);
+  g.fillEllipse(43, 13, 17, 9);
+  g.generateTexture('poison_mist', 58, 34);
+
+  g.clear();
+  g.fillStyle(0xffffff, 1);
+  g.fillPoints(p([[8, 0], [14, 5], [11, 8], [15, 14], [8, 11], [3, 15], [4, 9], [0, 6], [6, 5]]), true);
+  g.generateTexture('corrosion_shard', 16, 16);
+
+  g.clear();
+  g.fillStyle(0xffffff, 0.38);
+  g.fillCircle(9, 9, 8);
+  g.fillStyle(0xffffff, 0.92);
+  g.fillCircle(9, 9, 4);
+  g.fillCircle(5, 6, 2);
+  g.lineStyle(1, 0xffffff, 0.75);
+  g.strokeCircle(9, 9, 7);
+  g.generateTexture('spore_mote', 18, 18);
+
+  g.clear();
+  g.fillStyle(0xffffff, 0.32);
+  g.fillPoints(p([[11, 0], [21, 9], [17, 27], [6, 27], [1, 10]]), true);
+  g.fillStyle(0xffffff, 0.92);
+  g.fillPoints(p([[11, 1], [18, 9], [11, 24], [4, 10]]), true);
+  g.lineStyle(1, 0xffffff, 1);
+  g.lineBetween(11, 1, 11, 24);
+  g.lineBetween(4, 10, 18, 9);
+  g.generateTexture('prism_shard', 22, 28);
+
+  g.clear();
+  g.lineStyle(8, 0xffffff, 0.28);
+  g.beginPath();
+  g.arc(32, 32, 23, -2.5, 0.8, false);
+  g.strokePath();
+  g.lineStyle(3, 0xffffff, 0.92);
+  g.beginPath();
+  g.arc(32, 32, 23, -2.5, 0.8, false);
+  g.strokePath();
+  g.generateTexture('vortex_arc', 64, 64);
+
+  g.clear();
+  g.fillStyle(0xffffff, 0.3);
+  g.fillPoints(p([[10, 0], [19, 8], [14, 33], [6, 33], [1, 8]]), true);
+  g.fillStyle(0xffffff, 0.9);
+  g.fillPoints(p([[10, 2], [16, 9], [10, 29], [4, 9]]), true);
+  g.lineStyle(1, 0xffffff, 0.9);
+  g.lineBetween(10, 2, 10, 29);
+  g.generateTexture('mirror_shard', 20, 34);
+
+  g.clear();
+  g.fillStyle(0xffffff, 0.2);
+  g.fillPoints(p([[9, 0], [17, 9], [13, 27], [5, 27], [1, 9]]), true);
+  g.fillStyle(0xffffff, 1);
+  g.fillPoints(p([[9, 2], [14, 9], [9, 24], [4, 9]]), true);
+  g.generateTexture('lava_shard', 18, 28);
+
+  g.clear();
+  g.fillStyle(0xffffff, 1);
+  g.fillRect(29, 0, 6, 64);
+  g.fillRect(0, 29, 64, 6);
+  g.fillStyle(0xffffff, 0.8);
+  g.fillPoints(p([[32, 5], [39, 25], [59, 32], [39, 39], [32, 59], [25, 39], [5, 32], [25, 25]]), true);
+  g.generateTexture('holy_sigil', 64, 64);
+
+  g.clear();
+  g.lineStyle(4, 0xffffff, 1);
+  const hex = p([[32, 3], [57, 18], [57, 46], [32, 61], [7, 46], [7, 18]]);
+  g.strokePoints(hex, true, true);
+  g.lineStyle(1, 0xffffff, 0.55);
+  g.strokeCircle(32, 32, 18);
+  g.generateTexture('fx_hex', 64, 64);
+}
+
+function generateBeamTextures(scene) {
+  const makeBeam = (key, width, height, corePower) => {
+    if (scene.textures.exists(key)) return;
+    const canvas = scene.textures.createCanvas(key, width, height);
+    const context = canvas.getContext();
+    const image = context.createImageData(width, height);
+    const midY = (height - 1) / 2;
+    for (let y = 0; y < height; y++) {
+      const distance = Math.abs(y - midY) / Math.max(1, midY);
+      const alpha = Math.pow(Math.max(0, 1 - distance), corePower);
+      for (let x = 0; x < width; x++) {
+        const endFade = Math.min(1, x / 3, (width - 1 - x) / 3);
+        const offset = (y * width + x) * 4;
+        image.data[offset] = 255;
+        image.data[offset + 1] = 255;
+        image.data[offset + 2] = 255;
+        image.data[offset + 3] = Math.round(alpha * Math.max(0, endFade) * 255);
+      }
+    }
+    context.putImageData(image, 0, 0);
+    canvas.refresh();
+  };
+  makeBeam('beam_outer', 64, 28, 1.8);
+  makeBeam('beam_core', 64, 8, 0.75);
+  makeBeam('electric_spark', 28, 7, 0.9);
+}
+
+function generateVfxNoiseTexture(scene) {
+  const key = 'vfx_noise';
+  if (scene.textures.exists(key)) return;
+  const size = 64;
+  const canvas = scene.textures.createCanvas(key, size, size);
+  const context = canvas.getContext();
+  const image = context.createImageData(size, size);
+  let seed = 0x6d2b79f5;
+  for (let i = 0; i < size * size; i++) {
+    seed = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    seed ^= seed + Math.imul(seed ^ (seed >>> 7), 61 | seed);
+    const value = ((seed ^ (seed >>> 14)) >>> 24) & 0xff;
+    const offset = i * 4;
+    image.data[offset] = value;
+    image.data[offset + 1] = value;
+    image.data[offset + 2] = value;
+    image.data[offset + 3] = 255;
+  }
+  context.putImageData(image, 0, 0);
+  canvas.refresh();
 }
 import Phaser from 'phaser';

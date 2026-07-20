@@ -12,12 +12,14 @@ import {
 import { loadSave } from '../save.js';
 import { setMuted } from '../audio.js';
 import { Poki } from '../poki.js';
+import { preloadVfxAssets, warmupVfxShaders } from '../vfx/VfxRuntime.js';
 
 export class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
 
   preload() {
     this.load.on('progress', (value) => window.setLoadingProgress?.(value));
+    preloadVfxAssets(this);
     // 森林背景图（可选资源：缺失时回退程序化绘制）
     this.load.image('map_bg', 'assets/maps/forest-grid-bg.png');
     this.load.spritesheet('vfx_frost_nova_seq', 'assets/vfx/frost-nova-seq.webp', { frameWidth: 320, frameHeight: 320 });
@@ -32,6 +34,7 @@ export class BootScene extends Phaser.Scene {
 
   create() {
     generateTextures(this);
+    warmupVfxShaders(this);
     createEnemyAnimations(this);
     const save = loadSave();
     setMuted(save.muted);
@@ -40,9 +43,10 @@ export class BootScene extends Phaser.Scene {
     Poki.init().then(async () => {
       Poki.gameLoadingFinished();
       window.finishLoading?.();
-      // 给 Inspector 一帧处理加载完成事件，然后进入首页等待玩家主动开始。
+      // 给 Inspector 一帧处理加载完成事件；?skilltest 可直达技能测试场景。
       await new Promise(resolve => window.requestAnimationFrame(resolve));
-      this.scene.start('Menu');
+      const skillTest = new URLSearchParams(window.location.search).has('skilltest');
+      this.scene.start(skillTest ? 'SkillTest' : 'Menu');
     });
   }
 }

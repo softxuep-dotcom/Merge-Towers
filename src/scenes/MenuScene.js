@@ -32,6 +32,12 @@ export class MenuScene extends Phaser.Scene {
       bg: 0x102434, stroke: 0x426476, fontSize: 16, radius: 14, shadowAlpha: 0.2,
       onClick: () => this.showLanguageMenu(),
     }).setDepth(100);
+    if (import.meta.env.DEV) {
+      makeButton(this, wide ? 112 : 84, 52, 142, 46, '技能测试', {
+        bg: 0x183447, stroke: 0x5a8393, fontSize: 16, radius: 14, shadowAlpha: 0.2,
+        onClick: () => this.scene.start('SkillTest'),
+      }).setDepth(100);
+    }
     const bg = this.add.graphics().setDepth(-30);
     bg.fillGradientStyle(0x153c3d, 0x123144, 0x091827, 0x050c14, 1);
     bg.fillRect(0, 0, viewW, viewH);

@@ -28,7 +28,7 @@ function expectedWave(w) {
     const bosses = w < 20 ? 1 : w < 30 ? 2 : 3 + Math.floor((w - 30) / 20);
     list.push({ ...ENEMY_TYPES.boss, n: bosses, boss: true });
     if (w >= 10) {
-      const guards = Math.min(14, waveCount(w) - bosses);
+      const guards = Math.min(10, waveCount(w) - bosses);
       list.push({ ...ENEMY_TYPES.slime, n: guards * 0.4 });
       list.push({ ...ENEMY_TYPES.runner, n: guards * 0.6 });
     }
@@ -39,6 +39,7 @@ function expectedWave(w) {
   if (w >= ENEMY_TYPES.tank.from) pool.push(['tank', 20]);
   if (w >= ENEMY_TYPES.flyer.from) pool.push(['flyer', 18]);
   if (w >= ENEMY_TYPES.splitter.from) pool.push(['splitter', 16]);
+  if (w >= ENEMY_TYPES.priest.from) pool.push(['priest', 12]);
   const total = pool.reduce((s, p) => s + p[1], 0);
   const n = waveCount(w);
   for (const [k, wgt] of pool) {

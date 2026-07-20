@@ -38,7 +38,7 @@ export class TutorialScene extends Phaser.Scene {
     const cards = [
       ['01  固定五塔', '开局直接拥有火、水、电、光、毒五座 Lv1 塔。\n不再购买、拖动或合成塔。', 0x65d6a0],
       ['02  源能升级', '击杀与过波获得 ◆源能。点击“升级防御塔”，\n先决定升级哪座塔。', 0x72d6ff],
-      ['03  每级决策', 'Lv1→Lv2 选择核心裂变；Lv3→Lv7 选择范围、\n频率或强度；Lv8 选择终极变异。', 0xffd166],
+      ['03  每级决策', 'Lv1→Lv2 选择核心裂变；Lv3→Lv9 每级选择范围、\n频率或强度；单方向最高 Rank 5。', 0xffd166],
     ];
     cards.forEach(([title, desc, color], i) => {
       const y = 485 + i * 178;

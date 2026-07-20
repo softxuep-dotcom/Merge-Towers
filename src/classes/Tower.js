@@ -24,11 +24,8 @@ export class Tower {
     this.branch = null;
     this.skill = null;
     this.ranks = { range: 0, frequency: 0, power: 0 };
-    this.ultimate = null;
     this.attackCount = 0;
     this.lastUpgradeWave = 0;
-    this.lastUltimateAt = -Infinity;
-    this.chargeStreak = 0;
     this.hasMoved = false;
     this.cooldown = 0;
     this.dragging = false;
@@ -53,7 +50,7 @@ export class Tower {
       fontFamily: 'Arial Black, sans-serif', fontSize: '16px', color: '#ffffff',
     }).setOrigin(0.5);
     const children = [this.shadow, this.highlightGlow];
-    // Lv8 常驻光环
+    // 满级常驻光环
     if (lv >= MAX_LV) {
       this.aura = scene.add.image(0, -20, 'glow').setScale(2.6).setTint(e.color).setAlpha(0.8);
       children.push(this.aura);
@@ -72,7 +69,9 @@ export class Tower {
   get dmg() { return towerDmg(this.elem, this.lv) * powerMultiplier(this); }
   get range() { return towerRange(this.lv) * (TOWER_RANGE_MULT[this.elem] || 1) * (1 + 0.06 * rangeRank(this)); }
   get rate() {
-    const branchMult = this.elem === 'fire' && this.skill === 'molten' ? 0.8 : 1;
+    const branchMult = this.elem === 'fire' && this.skill === 'molten'
+      ? (this.ranks.power >= 3 ? 0.85 : 0.8)
+      : 1;
     return ELEMENTS[this.elem].rate * branchMult * (1 + 0.08 * frequencyRank(this));
   }
   get goldMult() { return 1; }

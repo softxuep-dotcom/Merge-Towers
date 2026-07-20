@@ -1,8 +1,14 @@
 import { ELEMENTS, MAX_LV } from './config.js';
 import { getLocale } from './i18n.js';
 
-export const UPGRADE_COSTS = Object.freeze({ 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 4, 8: 5 });
+// Keep late upgrades meaningful without making them several times slower than
+// the opening choices. Half-point steps also stay readable in the HUD.
+export const UPGRADE_COSTS = Object.freeze({ 2: 1, 3: 1, 4: 1.5, 5: 1.5, 6: 2, 7: 2, 8: 2.5, 9: 3 });
+export const SOURCE_PER_WAVE = 0.75;
+export const SOURCE_KILL_SHARE = 0.58;
+export const GOLD_PER_SOURCE = 140;
 export const GROWTH_TRACKS = Object.freeze(['range', 'frequency', 'power']);
+export const MAX_GROWTH_RANK = 5;
 
 const CORE = Object.freeze({
   fire: [
@@ -33,39 +39,21 @@ const CORE = Object.freeze({
 });
 
 const TRACK_NAMES = Object.freeze({
-  fire: { range: ['扩爆装药', 'EXPANSIVE CHARGE'], frequency: ['易燃配方', 'VOLATILE MIX'], power: ['高温燃料', 'HIGH-HEAT FUEL'] },
-  ice: { range: ['潮域扩张', 'TIDAL REACH'], frequency: ['回流脉冲', 'REFLUX PULSE'], power: ['深寒水压', 'DEEP-FROST PRESSURE'] },
-  lightning: { range: ['导体网络', 'CONDUCTOR WEB'], frequency: ['快速充能', 'FAST CHARGE'], power: ['过载电压', 'OVERVOLTAGE'] },
-  light: { range: ['光路展开', 'LIGHT PATH'], frequency: ['聚焦透镜', 'FOCUS LENS'], power: ['高能光束', 'HIGH-ENERGY BEAM'] },
-  poison: { range: ['扩散培养', 'SPREAD CULTURE'], frequency: ['快速催化', 'FAST CATALYSIS'], power: ['致命毒株', 'LETHAL STRAIN'] },
-});
-
-const ULTIMATES = Object.freeze({
-  fire: [
-    { key: 'supernova', icon: '✹', zh: '超新星', en: 'SUPERNOVA', zhDesc: '技能范围×1.6，并周期性必定触发核心技能', enDesc: 'Skill area x1.6 and periodically guarantees the core skill' },
-    { key: 'eternal', icon: '♨', zh: '永燃', en: 'ETERNAL FLAME', zhDesc: '燃烧与火区可叠2层，满层死亡时传播燃烧', enDesc: 'Burns and fire zones stack twice and spread on death' },
-    { key: 'heatdeath', icon: '☀', zh: '热寂', en: 'HEAT DEATH', zhDesc: '对高血或低血敌人伤害+60%，Boss始终生效', enDesc: '+60% damage to high/low-HP enemies; always active vs Bosses' },
-  ],
-  ice: [
-    { key: 'iceage', icon: '❄', zh: '冰封纪元', en: 'ICE AGE', zhDesc: '每8秒冻结射程内敌人，Boss只受短暂冻结', enDesc: 'Freeze enemies in range every 8s; shorter against Bosses' },
-    { key: 'reverse', icon: '↶', zh: '逆潮', en: 'REVERSE TIDE', zhDesc: '技能可将普通敌人送回路径，Boss改为强减速', enDesc: 'Skills can rewind normal enemies; strongly slow Bosses instead' },
-    { key: 'myriad', icon: '◇', zh: '万镜潮生', en: 'MYRIAD MIRRORS', zhDesc: '技能触发后以60%效果重复一次', enDesc: 'Repeat each triggered skill at 60% effect' },
-  ],
-  lightning: [
-    { key: 'skynet', icon: 'ϟ', zh: '天穹雷网', en: 'SKYNET', zhDesc: '电技能目标上限+6，连锁不再衰减', enDesc: '+6 electric skill targets and no chain falloff' },
-    { key: 'capacitor', icon: '∿', zh: '无限电容', en: 'INFINITE CAPACITOR', zhDesc: '技能触发返还30%攻击间隔，连续触发后强化', enDesc: 'Skill triggers refund 30% attack time and build a burst streak' },
-    { key: 'stormeye', icon: '◉', zh: '风暴眼', en: 'STORM EYE', zhDesc: '同一敌人累计8次电击后引爆350%伤害', enDesc: 'Explode a target for 350% damage after 8 electric hits' },
-  ],
-  light: [
-    { key: 'sevenlight', icon: '✧', zh: '七重天光', en: 'SEVENFOLD LIGHT', zhDesc: '每第7次攻击追加7道70%伤害的天光', enDesc: 'Every 7th attack calls 7 sky beams for 70% damage each' },
-    { key: 'finaljudgement', icon: '⚖', zh: '最终审判', en: 'FINAL JUDGMENT', zhDesc: '强化精英处决，并随Boss失血持续增伤', enDesc: 'Stronger elite execution and rising damage as Boss HP falls' },
-    { key: 'daylight', icon: '☀', zh: '永昼圣域', en: 'ETERNAL DAYLIGHT', zhDesc: '强化全队技能，且每波抵消基地首次受伤', enDesc: 'Boost allied skills and block the first base hit each wave' },
-  ],
-  poison: [
-    { key: 'blackdeath', icon: '☣', zh: '黑死病', en: 'BLACK DEATH', zhDesc: '毒可叠3层，满层敌人死亡必定传播', enDesc: 'Poison stacks 3 times and full stacks always spread on death' },
-    { key: 'dissolve', icon: '⬡', zh: '溶解装甲', en: 'ARMOR DISSOLVE', zhDesc: '毒伤完全无视护甲，溢出减甲转化为毒伤', enDesc: 'Poison fully ignores armor and excess shred becomes damage' },
-    { key: 'hive', icon: '◌', zh: '菌群意识', en: 'HIVE MIND', zhDesc: '场上中毒敌人越多，毒塔攻速与技能伤害越高', enDesc: 'More poisoned enemies grant attack speed and skill damage' },
-  ],
+  blast: { range: ['扩爆装药', 'EXPANSIVE CHARGE'], frequency: ['易燃配方', 'VOLATILE MIX'], power: ['高温燃料', 'HIGH-HEAT FUEL'] },
+  molten: { range: ['震荡弹壳', 'SHOCK SHELL'], frequency: ['临界点火', 'CRITICAL IGNITION'], power: ['熔核增压', 'CORE PRESSURE'] },
+  scorched: { range: ['火域扩张', 'FIRE ZONE'], frequency: ['余烬循环', 'EMBER CYCLE'], power: ['地火增压', 'GROUND-FIRE BOOST'] },
+  glacier: { range: ['冰爆扩散', 'FROST SPREAD'], frequency: ['寒潮回响', 'COLD ECHO'], power: ['极寒增压', 'DEEP-FROST BOOST'] },
+  vortex: { range: ['涡流扩张', 'VORTEX REACH'], frequency: ['潮汐共振', 'TIDAL RESONANCE'], power: ['回卷增压', 'REWIND PRESSURE'] },
+  mirror: { range: ['镜箭阵列', 'MIRROR ARRAY'], frequency: ['分流节拍', 'SPLIT RHYTHM'], power: ['镜面贯注', 'MIRROR FOCUS'] },
+  chain: { range: ['导体网络', 'CONDUCTOR WEB'], frequency: ['连锁充能', 'CHAIN CHARGE'], power: ['过载电压', 'OVERVOLTAGE'] },
+  nexus: { range: ['感应半径', 'SENSE RADIUS'], frequency: ['雷枢充能', 'NEXUS CHARGE'], power: ['裁决电压', 'JUDGMENT VOLTAGE'] },
+  magstorm: { range: ['磁场扩张', 'FIELD EXPANSION'], frequency: ['磁暴循环', 'STORM CYCLE'], power: ['超导增压', 'SUPERCONDUCTOR'] },
+  refraction: { range: ['光路展开', 'LIGHT PATH'], frequency: ['折射节拍', 'REFRACTION RHYTHM'], power: ['高能光束', 'HIGH-ENERGY BEAM'] },
+  judgement: { range: ['审判扩散', 'JUDGMENT SPREAD'], frequency: ['裁决加速', 'VERDICT HASTE'], power: ['处决增幅', 'EXECUTION POWER'] },
+  radiance: { range: ['圣辉领域', 'RADIANT FIELD'], frequency: ['共鸣频率', 'RESONANT RATE'], power: ['光环增幅', 'AURA POWER'] },
+  plague: { range: ['扩散培养', 'SPREAD CULTURE'], frequency: ['快速催化', 'FAST CATALYSIS'], power: ['致命毒株', 'LETHAL STRAIN'] },
+  corrosion: { range: ['腐蚀扩散', 'CORROSIVE SPREAD'], frequency: ['酸蚀成形', 'ACID FORMATION'], power: ['强酸配方', 'STRONG ACID'] },
+  spores: { range: ['菌云扩张', 'SPORE CLOUD'], frequency: ['孢潮循环', 'SPORE CYCLE'], power: ['孢子增压', 'SPORE PRESSURE'] },
 });
 
 function isZh() { return getLocale() === 'zh-CN'; }
@@ -79,9 +67,7 @@ export function upgradeCostFor(tower) {
 export function coreSkillDef(elem, key) { return CORE[elem]?.find(def => def.key === key) || null; }
 export function towerSkillName(tower) {
   if (!tower?.skill) return isZh() ? '尚未裂变' : 'UNSPLIT';
-  const coreName = local(coreSkillDef(tower.elem, tower.skill)) || tower.skill;
-  const ultimate = tower.ultimate ? ULTIMATES[tower.elem]?.find(def => def.key === tower.ultimate) : null;
-  return ultimate ? `${coreName} / ${local(ultimate)}` : coreName;
+  return local(coreSkillDef(tower.elem, tower.skill)) || tower.skill;
 }
 
 function triggerDetail(tower, rank, zh) {
@@ -99,8 +85,8 @@ function triggerDetail(tower, rank, zh) {
     return zh ? `；触发周期 ${a}→${b} 次攻击` : `; trigger cycle ${a}→${b} attacks`;
   }
   if (tower.skill === 'radiance') {
-    const vals = [10, 14, 18, 22, 26, 30];
-    return zh ? `；圣辉增伤 ${vals[rank - 1]}%→${vals[rank]}%` : `; Radiance bonus ${vals[rank - 1]}%→${vals[rank]}%`;
+    const vals = [0, 2, 4, 6, 8, 10];
+    return zh ? `；光环内友军攻速 +${vals[rank - 1]}%→+${vals[rank]}%` : `; allied aura speed +${vals[rank - 1]}%→+${vals[rank]}%`;
   }
   return '';
 }
@@ -110,7 +96,8 @@ function growthDescription(tower, track, rank) {
     if (track === 'range') return `范围 Rank ${rank}：攻击射程+6%；技能半径+15~20，范围伤害+8~10%`;
     if (track === 'frequency') return `频率 Rank ${rank}：攻击速度+8%${triggerDetail(tower, rank, true)}`;
     const gain = tower.elem === 'fire' ? (rank === 1 ? 30 : 15) : tower.elem === 'poison' ? 20 : tower.elem === 'lightning' ? 18 : 15;
-    return `强度 Rank ${rank}：核心命中与技能伤害+${gain}%`;
+    const aura = tower.skill === 'radiance' ? '；圣辉增伤 +4 个百分点' : '';
+    return `强度 Rank ${rank}：核心命中与技能伤害+${gain}%${aura}`;
   }
   if (track === 'range') return `RANGE Rank ${rank}: +6% range; +15–20 skill radius and +8–10% area damage`;
   if (track === 'frequency') return `FREQUENCY Rank ${rank}: +8% attack speed${triggerDetail(tower, rank, false)}`;
@@ -124,26 +111,32 @@ export function upgradeChoicesFor(tower) {
     kind: 'core', key: def.key, icon: def.icon, name: local(def), description: local(def, true),
     badge: isZh() ? '核心裂变' : 'CORE SPLIT', color: ELEMENTS[tower.elem].color,
   }));
-  if (tower.lv < 7) return GROWTH_TRACKS.map(track => {
-    const nextRank = (tower.ranks?.[track] || 0) + 1;
-    const pair = TRACK_NAMES[tower.elem][track];
+  return GROWTH_TRACKS.map(track => {
+    const currentRank = tower.ranks?.[track] || 0;
+    const maxed = currentRank >= MAX_GROWTH_RANK;
+    const nextRank = Math.min(MAX_GROWTH_RANK, currentRank + 1);
+    const pair = TRACK_NAMES[tower.skill]?.[track] || [track, track.toUpperCase()];
     return {
       kind: 'growth', key: track, icon: track === 'range' ? '◎' : track === 'frequency' ? '↻' : '▲',
-      name: isZh() ? pair[0] : pair[1], description: growthDescription(tower, track, nextRank),
-      badge: `RANK ${nextRank}`, color: ELEMENTS[tower.elem].color,
+      name: isZh() ? pair[0] : pair[1],
+      description: maxed
+        ? (isZh() ? '已达到 Rank 5 上限，请选择其他强化方向' : 'Rank 5 reached; choose another upgrade track')
+        : growthDescription(tower, track, nextRank),
+      badge: maxed ? 'MAX' : `RANK ${nextRank}`,
+      disabled: maxed,
+      color: ELEMENTS[tower.elem].color,
     };
   });
-  return ULTIMATES[tower.elem].map(def => ({
-    kind: 'ultimate', key: def.key, icon: def.icon, name: local(def), description: local(def, true),
-    badge: isZh() ? '终极变异' : 'ULTIMATE', color: ELEMENTS[tower.elem].color,
-  }));
 }
 
 export function applyTowerUpgrade(tower, choice) {
   if (!tower || !choice || tower.lv >= MAX_LV) return false;
   if (choice.kind === 'core' && tower.lv === 1) tower.skill = choice.key;
-  else if (choice.kind === 'growth' && tower.lv >= 2 && tower.lv < 7) tower.ranks[choice.key] = Math.min(5, (tower.ranks[choice.key] || 0) + 1);
-  else if (choice.kind === 'ultimate' && tower.lv === 7) tower.ultimate = choice.key;
+  else if (choice.kind === 'growth' && tower.lv >= 2) {
+    const rank = tower.ranks?.[choice.key] || 0;
+    if (rank >= MAX_GROWTH_RANK) return false;
+    tower.ranks[choice.key] = rank + 1;
+  }
   else return false;
   tower.lv++;
   tower.refreshLevelVisual?.();

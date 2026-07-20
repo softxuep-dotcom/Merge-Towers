@@ -5,6 +5,7 @@ import { MenuScene } from './scenes/MenuScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { ResultScene } from './scenes/ResultScene.js';
 import { TutorialScene } from './scenes/TutorialScene.js';
+import { SkillTestScene } from './scenes/SkillTestScene.js';
 import { touchSave } from './save.js';
 import { isMuted } from './audio.js';
 
@@ -18,7 +19,7 @@ const game = window.__game = new Phaser.Game({
     mode: Phaser.Scale.EXPAND,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [BootScene, MenuScene, TutorialScene, GameScene, ResultScene],
+  scene: [BootScene, MenuScene, TutorialScene, GameScene, ResultScene, SkillTestScene],
 });
 
 // Poki embeds the game in a scrollable page; gameplay keys must not scroll the host page.

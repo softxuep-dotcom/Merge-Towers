@@ -9,6 +9,8 @@
     "start": "vite --host 0.0.0.0 --port 8080",
     "build": "vite build",
     "check:i18n": "node tools/check-i18n.mjs",
+    "check:vfx": "node tools/check-skill-vfx.mjs",
+    "check:upgrades": "node tools/check-upgrade-progression.mjs",
     "package:poki": "npm run build && python tools/package-poki.py",
     "preview": "vite preview --host 0.0.0.0 --port 8080",
     "test": "echo \"Error: no test specified\" && exit 1"

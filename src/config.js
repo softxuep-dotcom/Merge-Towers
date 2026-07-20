@@ -2,9 +2,9 @@ import { t } from './i18n.js';
 
 // 全部平衡数值集中在此，对应 GDD-UpgradeTowers-Review.md
 export const W = 720, H = 1280;
-export const MAX_LV = 8;
+export const MAX_LV = 9;
 export const DEFAULT_DIFFICULTY = 'easy';
-export const ENEMY_HP_MULT = 1.05;
+export const ENEMY_HP_MULT = 1.12;
 // Waves are clock-driven now. Keep only a tiny reveal beat between waves so the
 // next group arrives on schedule instead of waiting for the field to be clear.
 export const PREP_DURATION_MS = 180;
@@ -194,8 +194,8 @@ export function nonBossSpeedMult(w) {
 export const WAVE_EVENTS = {
   fromWave: 3,
   chance: 0.35,
-  swarm: { key: 'swarm', countMult: 1.35, hpMult: 0.75 },
-  armored: { key: 'armored', armorBonus: 0.2 },
+  swarm: { key: 'swarm', countMult: 1.25, hpMult: 0.8 },
+  armored: { key: 'armored', armorBonus: 0.18 },
   haste: { key: 'haste', speedMult: 1.25, hpMult: 0.9 },
 };
 
@@ -204,12 +204,20 @@ export function waveHp(w, difficulty = DEFAULT_DIFFICULTY) {
   const hpBase = DIFFICULTIES[difficulty]?.hpBase ?? DIFFICULTIES[DEFAULT_DIFFICULTY].hpBase;
   return hpBase * ENEMY_HP_MULT * Math.pow(1.19, Math.min(w, 22)) * Math.pow(1.155, Math.max(0, w - 22));
 }
-export function waveCount(w) { return w === 1 ? 9 : Math.min(54, 12 + Math.floor(1.3 * w)); }
+// Fewer bodies keep the battlefield readable and reduce browser load. Pressure
+// is carried by slightly tougher units, elites and affixes instead of crowding.
+export function waveCount(w) { return w === 1 ? 8 : Math.min(42, 10 + Math.floor(w)); }
 // 生成等级地板（GDD §3.1）：相位对齐撞墙区间，封顶 Lv6（Lv7/8 只能靠合成）
 export function spawnFloor(w) { return w >= 40 ? 6 : w >= 30 ? 5 : w >= 22 ? 4 : w >= 15 ? 3 : w >= 8 ? 2 : 1; }
 
-// 普通波平均金币系数（按 composeWave 随机池权重推得，推导见 tools/balance-sim.mjs）
-function avgGoldMult(w) { return w >= 11 ? 1.47 : w >= 9 ? 1.35 : w >= 6 ? 1.39 : w >= 3 ? 0.89 : 1.0; }
+// 普通波平均金币系数（按 composeWave 当前随机池权重推得）。
+function avgGoldMult(w) {
+  if (w >= 14) return 1.51;
+  if (w >= 10) return 1.47;
+  if (w >= 7) return 1.42;
+  if (w >= 5) return 1.46;
+  return w >= 3 ? 0.89 : 1;
+}
 // 期望单波收入（一律按普通波构成估算，Boss 波也用它定价，避免塔价随波型跳变）
 export function expectedWaveIncome(w) {
   return waveCount(w) * waveHp(w) * 0.1 * avgGoldMult(w);
@@ -227,12 +235,12 @@ export function towerPrice(w, buysThisWave) {
 export const ENEMY_TYPES = {
   slime:    { hpMult: 1,    speed: 98,  goldMult: 1,   color: 0x87d64a, size: 24, from: 1 },
   runner:   { hpMult: 0.65, speed: 178, goldMult: 0.8, color: 0x55a8ff, size: 20, from: 3 },
-  tank:     { hpMult: 3.3,  speed: 64,  goldMult: 2.5, color: 0x9aa17d, size: 28, armor: 0.2, from: 6 },
-  flyer:    { hpMult: 0.9,  speed: 96,  goldMult: 1.2, color: 0x8c57d9, size: 22, flying: true, from: 6 },
-  splitter: { hpMult: 1.35, speed: 90,  goldMult: 1.5, color: 0xd6c453, size: 26, splits: true, from: 11 },
-  priest:   { hpMult: 1.15, speed: 78,  goldMult: 1.7, color: 0x42d9c7, size: 25, healer: true, from: 13 },
+  tank:     { hpMult: 3.6,  speed: 64,  goldMult: 2.7, color: 0x9aa17d, size: 28, armor: 0.22, from: 5 },
+  flyer:    { hpMult: 1.05, speed: 96,  goldMult: 1.3, color: 0x8c57d9, size: 22, flying: true, from: 7 },
+  splitter: { hpMult: 1.55, speed: 90,  goldMult: 1.7, color: 0xd6c453, size: 26, splits: true, from: 10 },
+  priest:   { hpMult: 1.35, speed: 78,  goldMult: 1.9, color: 0x42d9c7, size: 25, healer: true, from: 14 },
   mini:     { hpMult: 0.35, speed: 115, goldMult: 0.3, color: 0x87d64a, size: 15, from: 99 },
-  boss:     { hpMult: 15,   speed: 48,  goldMult: 14,  color: 0x748255, size: 44, boss: true, from: 5 },
+  boss:     { hpMult: 17,   speed: 48,  goldMult: 15,  color: 0x748255, size: 44, boss: true, from: 5 },
 };
 
 // 基地

@@ -79,6 +79,9 @@ export class Enemy {
     this.eliteShield = this.eliteAffix === 'shield' ? ELITE.shieldHits : 0;
     this.rewardGoldMult = this.elite ? ELITE.goldMult : 1;
     this.killGoldMult = 1;
+    // Base source belongs to the wave that spawned this enemy. Keeping it on
+    // the enemy prevents overlapping waves and splitter minis from overpaying.
+    this.sourceReward = opts.sourceReward || 0;
     // 状态（秒数倒计时，随游戏速度缩放）
     this.slowT = 0; this.slowPct = 0;
     this.frozenT = 0;

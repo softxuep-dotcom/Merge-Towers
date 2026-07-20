@@ -25,8 +25,11 @@ import { gameVfxMethods } from './gameVfx.js';
 import { upgradeVfxMethods } from './upgradeVfx.js';
 import { TowerUpgradeOverlay } from '../ui/TowerUpgradeOverlay.js';
 import {
+  GOLD_PER_SOURCE, SOURCE_KILL_SHARE, SOURCE_PER_WAVE,
   applyTowerUpgrade, frequencyRank, rangeRank, towerSkillName, upgradeChoicesFor, upgradeCostFor,
 } from '../towerUpgrades.js';
+import { VfxRuntime } from '../vfx/VfxRuntime.js';
+import { BeamSystem } from '../vfx/BeamSystem.js';
 
 // 地面路径（行进式像素描迹校准到石板路中轴线，2026-07-09）
 const PATH_PTS = [
@@ -57,9 +60,9 @@ const LANDSCAPE_SIDEBAR_MIN = 360;
 const LANDSCAPE_SIDEBAR_MAX = 430;
 const BONUS_TOWER_LIMIT = 1;
 const WAVE_DURATION_MS = 12000;
-const INITIAL_SPLIT_INTERVAL = 5;
-const AUTO_UPGRADE_GOLD_PER_ENERGY = 60;
-const INITIAL_SPLIT_ORDER = Object.freeze(['fire', 'ice', 'poison', 'lightning', 'light']);
+const DEFAULT_TOWER_LAYOUT = Object.freeze([
+  ['fire', 1], ['ice', 2], ['lightning', 3], ['light', 6], ['poison', 7],
+]);
 const TOWER_EFFECT_KEYS = {
   fire: 'game.cardEffectFire',
   ice: 'game.cardEffectIce',
@@ -69,7 +72,7 @@ const TOWER_EFFECT_KEYS = {
 };
 
 export class GameScene extends Phaser.Scene {
-  constructor() { super('Game'); }
+  constructor(key = 'Game') { super(key); }
 
   init(data = {}) {
     const requested = data.difficulty || this.registry.get('difficulty') || DEFAULT_DIFFICULTY;
@@ -143,16 +146,10 @@ export class GameScene extends Phaser.Scene {
     this.effectZones = [];
     this.nextEffectZoneId = 1;
     this.sourcePerKill = 0;
-    this.sourceEarnedThisWave = 0;
     this.upgradeChoiceOpen = false;
     this.upgradeOverlay = new TowerUpgradeOverlay(this);
     this.upgradePrevTimeScale = 1;
-    this.runElapsed = 0;
-    this.initialSplitIndex = 0;
-    this.nextInitialSplitAt = INITIAL_SPLIT_INTERVAL;
-    this.autoDraftCooldown = 0;
     this.waveTimeLeft = WAVE_DURATION_MS / 1000;
-    this.daylightGuardUsed = false;
     this.waveCombatTime = 0;
     this.waveTowerDamage = new Map();
     this.leakStats = {};
@@ -177,6 +174,7 @@ export class GameScene extends Phaser.Scene {
     this.tutorialForceTimer = null;
     this.tutorialFocusBlockers = [];
     this.tutorialForcedSlowmo = false;
+    this.initializeCombatVfx();
     this.installAudioLifecycle();
 
     this.path = new Path(PATH_PTS);
@@ -639,44 +637,87 @@ export class GameScene extends Phaser.Scene {
     this.updateDraftHud();
   }
 
+  formatUpgradeCost(value) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  }
+
+  upgradeStateFor(tower) {
+    const cost = upgradeCostFor(tower);
+    if (!Number.isFinite(cost)) return { cost, goldCost: Infinity, payment: null, waveLocked: false };
+    const goldCost = Math.round(cost * GOLD_PER_SOURCE);
+    const waveLocked = tower.lastUpgradeWave === this.wave;
+    const payment = waveLocked
+      ? null
+      : this.sourceEnergy + 1e-6 >= cost
+        ? 'energy'
+        : this.gold >= goldCost
+          ? 'gold'
+          : null;
+    return { cost, goldCost, payment, waveLocked };
+  }
+
+  upgradeableTowers() {
+    return this.towers.filter(tower => this.upgradeStateFor(tower).payment);
+  }
+
+  refreshUpgradeTowerHints(readyTowers) {
+    const readyIds = new Set(readyTowers.map(tower => tower.id));
+    for (const tower of this.towers) {
+      const ready = readyIds.has(tower.id) && !tower.dragging && !this.upgradeChoiceOpen;
+      if (tower.upgradeHintActive === ready) continue;
+      tower.upgradeHintActive = ready;
+      tower.setHighlight(ready);
+    }
+  }
+
   updateDraftHud() {
     if (!this.draftStatusText) return;
-    let label = '';
+    const pending = this.towers.filter(tower => Number.isFinite(upgradeCostFor(tower)));
+    const readyTowers = this.upgradeChoiceOpen ? [] : this.upgradeableTowers();
+    this.refreshUpgradeTowerHints(readyTowers);
+
+    let label;
     let progress = 0;
-    if (this.initialSplitIndex < INITIAL_SPLIT_ORDER.length) {
-      const elemKey = INITIAL_SPLIT_ORDER[this.initialSplitIndex];
-      const remaining = Math.max(0, Math.ceil(this.nextInitialSplitAt - this.runElapsed));
-      label = `首次裂变 ${this.initialSplitIndex + 1}/5 · ${ELEMENTS[elemKey].cn} · ${remaining}s`;
-      progress = 1 - Math.max(0, this.nextInitialSplitAt - this.runElapsed) / INITIAL_SPLIT_INTERVAL;
+    if (!pending.length) {
+      label = t('game.allTowersMax', { level: MAX_LV });
+      progress = 1;
+    } else if (this.upgradeChoiceOpen) {
+      label = t('upgradeCards.lockedChoice');
+      progress = 1;
+    } else if (readyTowers.length) {
+      label = t('game.upgradeReadyHint');
+      progress = 1;
     } else {
-      const candidates = this.autoUpgradeCandidates();
-      if (this.upgradeChoiceOpen || candidates.length) {
-        label = '升级已就绪 · 请选择 1 张卡片';
-        progress = 1;
+      const availableThisWave = pending.filter(tower => !this.upgradeStateFor(tower).waveLocked);
+      if (!availableThisWave.length) {
+        label = t('game.upgradeWaitNextWave');
       } else {
-        const costs = this.towers.map(upgradeCostFor).filter(Number.isFinite);
-        const cost = costs.length ? Math.min(...costs) : Infinity;
-        const goldCost = cost * AUTO_UPGRADE_GOLD_PER_ENERGY;
-        if (Number.isFinite(cost)) {
-          label = `升级充能  ◆${this.sourceEnergy.toFixed(1)}/${cost}  或  ${Math.floor(this.gold)}/${goldCost}金币`;
-          progress = Math.max(this.sourceEnergy / cost, this.gold / goldCost);
-        } else {
-          label = '所有塔均已达到 Lv8';
-          progress = 1;
-        }
+        const next = availableThisWave
+          .map(tower => this.upgradeStateFor(tower))
+          .sort((a, b) => a.cost - b.cost)[0];
+        label = t('game.upgradeChargingHint', {
+          source: this.sourceEnergy.toFixed(1),
+          cost: this.formatUpgradeCost(next.cost),
+          gold: Math.floor(this.gold),
+          goldCost: next.goldCost,
+        });
+        progress = Math.max(this.sourceEnergy / next.cost, this.gold / next.goldCost);
       }
     }
     this.draftStatusText.setText(label);
+    const ready = readyTowers.length > 0;
+    this.draftStatusText.setColor(ready ? '#eafff4' : '#e8f1f6');
+    this.draftStatusBg
+      .setFillStyle(ready ? 0x173a30 : UI_THEME.surfaceRaised, ready ? 0.94 : 0.76)
+      .setStrokeStyle(ready ? 2 : 1, ready ? 0x65e6ae : UI_THEME.line, ready ? 0.92 : 0.38);
+    this.draftProgress.setFillStyle(ready ? 0x65e6ae : UI_THEME.primaryBright, 0.92);
     const maxWidth = this.layout?.landscape ? Math.max(0, this.layout.sidebarW - 72) : 480;
     this.draftProgress.width = maxWidth * Phaser.Math.Clamp(progress, 0, 1);
   }
 
   // ================= 开局预置 =================
   presetTowers() {
-    const fixed = [
-      ['fire', 1], ['ice', 3], ['lightning', 5], ['light', 7], ['poison', 9],
-    ];
-    for (const [elem, index] of fixed) {
+    for (const [elem, index] of DEFAULT_TOWER_LAYOUT) {
       this.placeTower(this.slots[index], elem, 1, null, { animate: false });
     }
   }
@@ -711,12 +752,6 @@ export class GameScene extends Phaser.Scene {
     tower.c.on('pointerup', () => {
       if (tower.dragging || this.time.now < (tower.suppressUpgradeClickUntil || 0)) return;
       if (this.upgradeChoiceOpen) return;
-      if (this.initialSplitIndex < INITIAL_SPLIT_ORDER.length) {
-        const elemKey = INITIAL_SPLIT_ORDER[this.initialSplitIndex];
-        const remaining = Math.max(0, Math.ceil(this.nextInitialSplitAt - this.runElapsed));
-        toast(this, tower.slot.x, tower.slot.y - 115, `${ELEMENTS[elemKey].cn}裂变将在 ${remaining}s 后自动开启`, '#c8e8ff', 18, 1600);
-        return;
-      }
       this.openTowerUpgrade(tower);
     });
   }
@@ -790,147 +825,60 @@ export class GameScene extends Phaser.Scene {
     this.time.timeScale = 0;
   }
 
-  openUpgradePicker() {
-    if (this.over || this.dying || this.settingsOpen || this.isPaused) return;
-    const eligible = this.towers.some(tower => {
-      const cost = upgradeCostFor(tower);
-      return Number.isFinite(cost) && tower.lastUpgradeWave !== this.wave && this.sourceEnergy + 1e-6 >= cost;
-    });
-    if (!eligible) {
-      toast(this, this.buyBtn.x, this.buyBtn.y - 130, t('game.needEnergy'), '#ffb0a2', 21, 2200);
+  openTowerUpgrade(tower) {
+    if (this.over || this.dying || this.settingsOpen || this.isPaused || tower.dragging) return;
+    const state = this.upgradeStateFor(tower);
+    if (!Number.isFinite(state.cost)) return;
+    if (state.waveLocked) {
+      toast(this, tower.slot.x, tower.slot.y - 115, t('game.upgradeWaveLocked'), '#c8d4df', 18, 1800);
       return;
     }
-    this.beginUpgradePause();
-    this.upgradeOverlay.showTowerPicker(
-      this.towers,
-      this.sourceEnergy,
-      tower => this.openTowerUpgrade(tower),
-      () => this.closeUpgradeOverlay(),
-    );
-  }
-
-  openTowerUpgrade(tower) {
-    const cost = upgradeCostFor(tower);
-    const goldCost = cost * AUTO_UPGRADE_GOLD_PER_ENERGY;
-    const canEnergy = this.sourceEnergy + 1e-6 >= cost;
-    const canGold = this.gold >= goldCost;
-    if (!Number.isFinite(cost) || (!canEnergy && !canGold)) {
-      if (!this.upgradeChoiceOpen) toast(this, tower.slot.x, tower.slot.y - 115, t('game.needEnergy'), '#ffb0a2', 20, 2000);
+    if (!state.payment) {
+      toast(this, tower.slot.x, tower.slot.y - 115, t('game.needEnergy'), '#ffb0a2', 20, 2000);
       return;
     }
     this.beginUpgradePause();
     const choices = upgradeChoicesFor(tower);
+    const subtitle = state.payment === 'energy'
+      ? t('game.upgradePaymentEnergy', { cost: this.formatUpgradeCost(state.cost) })
+      : t('game.upgradePaymentGold', { cost: state.goldCost });
     this.upgradeOverlay.showChoices(
       tower,
       choices,
-      choice => this.finishTowerUpgrade(tower, choice, canEnergy ? 'energy' : 'gold'),
+      choice => this.finishTowerUpgrade(tower, choice, state.payment),
       () => this.closeUpgradeOverlay(),
+      { subtitle },
     );
   }
 
   finishTowerUpgrade(tower, choice, payment = 'energy') {
     const cost = upgradeCostFor(tower);
-    const goldCost = cost * AUTO_UPGRADE_GOLD_PER_ENERGY;
-    if (!Number.isFinite(cost)) return;
+    const goldCost = Math.round(cost * GOLD_PER_SOURCE);
+    if (!Number.isFinite(cost) || !choice || choice.disabled || tower.lastUpgradeWave === this.wave) return;
     if (payment === 'gold') {
       if (this.gold < goldCost) return;
-      this.gold -= goldCost;
     } else {
       if (this.sourceEnergy + 1e-6 < cost) return;
-      this.sourceEnergy = Math.max(0, this.sourceEnergy - cost);
     }
     const oldLevel = tower.lv;
     if (!applyTowerUpgrade(tower, choice)) return;
+    if (payment === 'gold') this.gold -= goldCost;
+    else this.sourceEnergy = Math.max(0, this.sourceEnergy - cost);
+    tower.lastUpgradeWave = this.wave;
     this.highestLv = Math.max(this.highestLv, tower.lv);
     this.upgradeOverlay.destroy();
-    const ultimate = tower.lv === MAX_LV;
-    this.playUpgradeRiftFx(tower, { ultimate });
-    if (ultimate) {
-      this.playUltimateScreenFx(tower);
+    const reachedMaxLevel = tower.lv === MAX_LV;
+    this.playUpgradeRiftFx(tower, { maxLevel: reachedMaxLevel });
+    if (reachedMaxLevel) {
+      this.playMaxLevelScreenFx(tower);
       this.slowmoT = Math.max(this.slowmoT, 0.32);
-      this.banner(t('game.ultimateAwaken', { name: towerSkillName(tower) }));
+      this.banner(t('game.maxLevelReached', { name: towerSkillName(tower), level: MAX_LV }));
       Sfx.mergeTop();
     } else {
       Sfx.merge(tower.lv);
       toast(this, tower.slot.x, tower.slot.y - 120, `Lv${oldLevel} → Lv${tower.lv}  ${choice.name}`, this.hexColor(tower.color), 21, 2200);
     }
-    this.autoDraftCooldown = 0.45;
     this.closeUpgradeOverlay();
-  }
-
-  autoUpgradeCandidates() {
-    if (this.initialSplitIndex < INITIAL_SPLIT_ORDER.length) return [];
-    const pool = [];
-    for (const tower of this.towers) {
-      const cost = upgradeCostFor(tower);
-      if (!Number.isFinite(cost)) continue;
-      const goldCost = cost * AUTO_UPGRADE_GOLD_PER_ENERGY;
-      const payment = this.sourceEnergy + 1e-6 >= cost ? 'energy' : this.gold >= goldCost ? 'gold' : null;
-      if (!payment) continue;
-      for (const choice of upgradeChoicesFor(tower)) pool.push({ tower, choice, cost, goldCost, payment });
-    }
-    return pool;
-  }
-
-  updateAutoUpgradeFlow() {
-    if (this.over || this.dying || this.settingsOpen || this.isPaused || this.upgradeChoiceOpen) return;
-    if (this.initialSplitIndex < INITIAL_SPLIT_ORDER.length) {
-      if (this.runElapsed + 1e-6 >= this.nextInitialSplitAt) this.openScheduledCoreSplit();
-      return;
-    }
-    if (this.autoDraftCooldown > 0) return;
-    const candidates = this.autoUpgradeCandidates();
-    if (candidates.length) this.openAutoUpgradeDraft(candidates);
-  }
-
-  openScheduledCoreSplit() {
-    const elemKey = INITIAL_SPLIT_ORDER[this.initialSplitIndex];
-    const tower = this.towers.find(item => item.elem === elemKey && item.lv === 1);
-    if (!tower) {
-      this.initialSplitIndex++;
-      this.nextInitialSplitAt += INITIAL_SPLIT_INTERVAL;
-      return;
-    }
-    this.beginUpgradePause();
-    this.upgradeOverlay.showChoices(
-      tower,
-      upgradeChoicesFor(tower),
-      choice => this.finishScheduledCoreSplit(tower, choice),
-      null,
-      { mandatory: true, subtitle: `第 ${this.initialSplitIndex + 1}/5 次首次裂变 · 本次免费` },
-    );
-  }
-
-  finishScheduledCoreSplit(tower, choice) {
-    const oldLevel = tower.lv;
-    if (!applyTowerUpgrade(tower, choice)) return;
-    this.highestLv = Math.max(this.highestLv, tower.lv);
-    this.initialSplitIndex++;
-    this.nextInitialSplitAt += INITIAL_SPLIT_INTERVAL;
-    this.playUpgradeRiftFx(tower, { ultimate: false });
-    Sfx.merge(tower.lv);
-    toast(this, tower.slot.x, tower.slot.y - 120, `Lv${oldLevel} → Lv${tower.lv}  ${choice.name}`, this.hexColor(tower.color), 21, 2200);
-    this.closeUpgradeOverlay();
-  }
-
-  openAutoUpgradeDraft(candidates = this.autoUpgradeCandidates()) {
-    if (!candidates.length) return;
-    const cards = Phaser.Utils.Array.Shuffle([...candidates]).slice(0, 4).map(entry => {
-      const elem = ELEMENTS[entry.tower.elem];
-      const pay = entry.payment === 'energy' ? `消耗 ◆${entry.cost}` : `消耗 ${entry.goldCost} 金币`;
-      return {
-        ...entry,
-        color: entry.choice.color,
-        icon: entry.choice.icon,
-        name: `${elem.cn} Lv${entry.tower.lv + 1} · ${entry.choice.name}`,
-        description: `${entry.choice.description}\n${pay}`,
-        badge: entry.choice.badge,
-      };
-    });
-    this.beginUpgradePause();
-    this.upgradeOverlay.showGlobalDraft(cards, card => {
-      this.finishTowerUpgrade(card.tower, card.choice, card.payment);
-    });
   }
 
   closeUpgradeOverlay() {
@@ -1244,7 +1192,7 @@ export class GameScene extends Phaser.Scene {
         list.push({ type: 'boss', ...this.bossOptionsForWave(w, i) });
       }
       if (w >= 10) {
-        const guards = Math.min(14, waveCount(w) - bosses);
+        const guards = Math.min(10, waveCount(w) - bosses);
         for (let i = 0; i < guards; i++) list.push(Math.random() < 0.4 ? 'slime' : 'runner');
       }
       return list;
@@ -1352,7 +1300,6 @@ export class GameScene extends Phaser.Scene {
     if (this.prepTimer) this.prepTimer.remove();
     this.waveGoldMult = early ? 1.1 : 1.0;
     this.holyHealThisWave = 0;
-    this.daylightGuardUsed = false;
     this.callBtn.setVisible(false);
     this.previewText.setText('');
     this.previewBg.setVisible(false);
@@ -1364,9 +1311,8 @@ export class GameScene extends Phaser.Scene {
 
     const queue = this.pending.slice();
     this.waveTimeLeft = WAVE_DURATION_MS / 1000;
-    this.sourceEarnedThisWave = 0;
     this.sourcePerKill = queue.length > 0
-      ? (0.8 * this.waveGoldMult * (1 + 0.03 * tier(this.S, 'startLv'))) / queue.length
+      ? (SOURCE_KILL_SHARE * this.waveGoldMult * (1 + 0.03 * tier(this.S, 'startLv'))) / queue.length
       : 0;
     this.spawnLeft = queue.length;
     const earlyMult = this.wave <= EARLY_WAVE_CUTOFF ? Math.max(0.82, EARLY_WAVE_SPAWN_INTERVAL_MULT) : 1;
@@ -1378,11 +1324,11 @@ export class GameScene extends Phaser.Scene {
         if (this.over || this.dying) return;
         const item = queue[i++];
         if (typeof item === 'string') {
-          this.spawnEnemy(item);
+          this.spawnEnemy(item, { sourceReward: this.sourcePerKill });
         } else {
           const { type, ...opts } = item;
           if (opts.eliteAffix && !opts.hpMult) opts.hpMult = ELITE.hpMult;
-          this.spawnEnemy(type, opts);
+          this.spawnEnemy(type, { ...opts, sourceReward: this.sourcePerKill });
         }
         this.spawnLeft--;
       },
@@ -1458,8 +1404,8 @@ export class GameScene extends Phaser.Scene {
     this.resonanceGoldMult = 1;
     this.waveBought = 0; // 波内价格热度重置
     this.holyHealThisWave = 0;
-    const sourceTarget = 1 + 0.05 * tier(this.S, 'interest');
-    const sourceGain = Math.max(0, sourceTarget - this.sourceEarnedThisWave);
+    const sourceTarget = SOURCE_PER_WAVE * (1 + 0.05 * tier(this.S, 'interest'));
+    const sourceGain = Math.max(0, sourceTarget - SOURCE_KILL_SHARE);
     if (sourceGain > 0) this.sourceEnergy += sourceGain;
     const finished = this.wave;
     this.wave++;
@@ -1538,9 +1484,8 @@ export class GameScene extends Phaser.Scene {
       waveHp(e.spawnWave) * 0.1 * e.type.goldMult * e.rewardGoldMult * e.killGoldMult * this.waveGoldMult,
     ));
     this.gold += gold;
-    const source = this.sourcePerKill + (e.elite ? 0.15 : 0) + (e.boss ? 0.4 : 0);
+    const source = e.sourceReward + (e.elite ? 0.15 : 0) + (e.boss ? 0.4 : 0);
     this.sourceEnergy += source;
-    this.sourceEarnedThisWave += source;
     this.burst(e.x, e.y, e.type.color, e.boss ? 40 : 12, e.boss ? 1.6 : 1);
     this.coinFly(e.x, e.y, gold);
     if (source >= 0.08) this.showDmg(e.x, e.y - 58, `◆${source.toFixed(1)}`, '#9fe8ff');
@@ -1587,19 +1532,15 @@ export class GameScene extends Phaser.Scene {
       }
       this.playPlagueBurstFx(e.x, e.y, radius, infected);
     }
-    // 永燃：只有同时处在两片独立火区中的敌人才会在死亡时传播一层火区。
-    const eternalMarks = (e.eternalFireMarks || []).filter(mark => mark.expiresAt > this.time.now);
-    const eternalSource = eternalMarks.find(mark => eternalMarks.filter(other => other.sourceTower === mark.sourceTower).length >= 2);
-    if (eternalSource) {
-      this.addElementZone(e.x, e.y, {
-        radius: 100,
-        dps: eternalSource.dps,
-        duration: 2,
-        color: eternalSource.sourceTower.color,
-        sourceTower: eternalSource.sourceTower,
-        mode: 'fire',
-      });
-      this.playSkillProcParticles(eternalSource.sourceTower, e.x, e.y, 1.25);
+    const corrosionSource = e.poisons.find(p => p.t > 0 && p.sourceTower?.skill === 'corrosion')?.sourceTower;
+    const corrosionRangeRank = corrosionSource ? rangeRank(corrosionSource) : 0;
+    if (corrosionSource && corrosionRangeRank > 0) {
+      const powerRank = corrosionSource.ranks?.power || 0;
+      const radius = 60 + 15 * corrosionRangeRank;
+      const amp = [0.08, 0.11, 0.14, 0.17, 0.2, 0.23][powerRank] * 0.5;
+      const shred = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4][powerRank] * 0.5;
+      for (const enemy of this.nearbyEnemies(e.x, e.y, radius).slice(0, 3)) enemy.applyCorrosion(amp, 3, shred);
+      this.playPlagueBurstFx(e.x, e.y, radius, []);
     }
     e.destroy();
     this.updateUI();
@@ -1633,14 +1574,7 @@ export class GameScene extends Phaser.Scene {
     if (this.over || this.dying) return;
     this.leakStats[leakedType] = (this.leakStats[leakedType] || 0) + 1;
     if (this.lastStandActive) this.lastStandLeaked = true;
-    const guarded = !this.daylightGuardUsed && this.towers.some(tower => tower.elem === 'light' && tower.ultimate === 'daylight');
-    if (guarded) {
-      this.daylightGuardUsed = true;
-      toast(this, 560, 940, t('game.daylightGuard'), '#fff8dc', 24);
-      this.playSkillProcParticles(this.towers.find(tower => tower.elem === 'light' && tower.ultimate === 'daylight'), 560, 940, 1.4);
-    } else {
-      this.baseHp -= e.boss ? LEAK_BOSS : LEAK_NORMAL;
-    }
+    this.baseHp -= e.boss ? LEAK_BOSS : LEAK_NORMAL;
     Sfx.leak();
     this.vignette.setAlpha(0.28);
     this.tweens.add({ targets: this.vignette, alpha: 0, duration: 400 });
@@ -2280,6 +2214,7 @@ export class GameScene extends Phaser.Scene {
         lv3: Math.round(towerDmg(elem, 3)),
         lv5: Math.round(towerDmg(elem, 5)),
         lv7: Math.round(towerDmg(elem, 7)),
+        lv9: Math.round(towerDmg(elem, 9)),
         rate: Number(def.rate.toFixed(1)),
         range: Math.round(towerRange(1) * (elem === 'ice' || elem === 'poison' ? 1.1 : 1)),
       }), {
@@ -3005,7 +2940,7 @@ export class GameScene extends Phaser.Scene {
       const aliveStacks = e.poisons.filter(p =>
         p.t > 0 && this.towerLineageOwner(p.sourceTower) === sourceOwner
       ).length;
-      e.applyPoison(t.dmg * multiplier * this.plagueDamageMult(t), aliveStacks + 1, false, t, { branchEffects: false });
+      e.applyPoison(t.dmg * multiplier, aliveStacks + 1, false, t, { branchEffects: false });
       this.showDmg(e.x, e.y - 42, '☠', '#9ef07a');
     }
   }
@@ -3348,39 +3283,52 @@ export class GameScene extends Phaser.Scene {
     return Math.min(1, bonus);
   }
 
-  plagueDamageMult(t) {
-    if (t.elem !== 'poison') return 1;
-    const poisoned = this.enemies.filter(enemy => !enemy.dead && enemy.poisons.some(p => p.t > 0)).length;
-    return t.ultimate === 'hive' ? 1 + Math.min(0.6, poisoned * 0.03) : 1;
-  }
-
   holyAuraBonus(t) {
     let bonus = 0;
     for (const aura of this.towers) {
-      if (aura === t || aura.elem !== 'light' || (aura.skill !== 'radiance' && aura.ultimate !== 'daylight')) continue;
+      if (aura === t || aura.elem !== 'light' || aura.skill !== 'radiance') continue;
       const d = Phaser.Math.Distance.Between(aura.slot.x, aura.slot.y, t.slot.x, t.slot.y);
       const radius = 130 + 20 * rangeRank(aura);
-      const power = aura.skill === 'radiance'
-        ? [0.1, 0.14, 0.18, 0.22, 0.26, 0.3][frequencyRank(aura) || 0]
-        : 0;
-      if (d <= radius) bonus += power + (aura.ultimate === 'daylight' ? 0.2 : 0);
+      const power = 0.1 + 0.04 * (aura.ranks?.power || 0);
+      if (d <= radius) bonus += power;
     }
     return Math.min(1, bonus);
   }
 
-  hiveAttackMult(t) {
-    if (t.elem !== 'poison' || t.ultimate !== 'hive') return 1;
-    const poisoned = this.enemies.filter(enemy => !enemy.dead && enemy.poisons.some(p => p.t > 0)).length;
-    return 1 + Math.min(0.4, poisoned * 0.02);
+  initializeCombatVfx() {
+    this.vfxRuntime = new VfxRuntime(this, { particleBudget: 220, maxShaders: 18 });
+    this.lightningBeams = new BeamSystem(this, this.vfxRuntime, { maxSlots: 24 });
+    this.skillAuraVfx = new Map();
+    this.events.once('shutdown', () => {
+      this.destroyPersistentSkillVfx();
+      this.lightningBeams?.destroy();
+      this.vfxRuntime?.destroy();
+      this.lightningBeams = null;
+      this.vfxRuntime = null;
+      this.skillAuraVfx = null;
+    });
+  }
+
+  updateCombatVfx(dts) {
+    this.vfxRuntime?.update(dts);
+    this.lightningBeams?.update(dts);
+    this.updatePersistentSkillVfx(dts);
+  }
+
+  holyAuraRateMult(t) {
+    let bonus = 0;
+    for (const aura of this.towers) {
+      if (aura === t || aura.elem !== 'light' || aura.skill !== 'radiance') continue;
+      const radius = 130 + 20 * rangeRank(aura);
+      const distance = Phaser.Math.Distance.Between(aura.slot.x, aura.slot.y, t.slot.x, t.slot.y);
+      if (distance <= radius) bonus += 0.02 * frequencyRank(aura);
+    }
+    return 1 + Math.min(0.5, bonus);
   }
 
   damageEnemy(tower, enemy, damage, color = '#ffffff', opts = {}) {
     if (!enemy || enemy.dead) return 0;
-    let mult = 1;
-    if (tower.ultimate === 'heatdeath' && (enemy.boss || enemy.hp / enemy.maxHp > 0.7 || enemy.hp / enemy.maxHp < 0.3)) mult *= 1.6;
-    if (tower.ultimate === 'finaljudgement' && enemy.boss) mult *= 1 + Math.min(0.54, Math.floor((1 - enemy.hp / enemy.maxHp) * 10) * 0.06);
-    if (tower.elem === 'poison') mult *= this.plagueDamageMult(tower);
-    const real = enemy.takeDamage(damage * mult, {
+    const real = enemy.takeDamage(damage, {
       trueDmg: !!opts.trueDmg,
       cause: opts.cause || 'hit',
       sourceTower: tower,
@@ -3398,17 +3346,39 @@ export class GameScene extends Phaser.Scene {
   }
 
   addElementZone(x, y, { radius, dps, duration, color, sourceTower, mode = 'damage' }) {
-    const ring = this.add.circle(x, y, radius, color, 0.08).setStrokeStyle(2, color, 0.58).setDepth(2038);
-    const particles = this.add.particles(x, y, 'spark', {
-      lifespan: { min: 380, max: 720 }, frequency: 110, quantity: 1,
-      speed: { min: 8, max: 35 }, angle: { min: 210, max: 330 },
-      scale: { start: 0.42, end: 0 }, alpha: { start: 0.56, end: 0 },
-      tint: [color, 0xffffff], blendMode: Phaser.BlendModes.ADD,
+    const skill = sourceTower?.skill;
+    const magstorm = skill === 'magstorm';
+    const scorched = skill === 'scorched';
+    const spores = skill === 'spores';
+    const zoneColor = magstorm ? 0xa897ff : scorched ? 0xff5b18 : spores ? 0x72d85c : color;
+    const particleTexture = magstorm && this.textures.exists('electric_spark')
+      ? 'electric_spark'
+      : scorched && this.textures.exists('fire_ember')
+        ? 'fire_ember'
+        : spores && this.textures.exists('spore_mote') ? 'spore_mote' : 'spark';
+    const ring = this.add.circle(x, y, radius, zoneColor, magstorm || scorched || spores ? 0.12 : 0.08)
+      .setStrokeStyle(magstorm ? 3 : scorched ? 4 : spores ? 3 : 2, zoneColor, magstorm || scorched || spores ? 0.76 : 0.58)
+      .setDepth(2038);
+    const particles = this.add.particles(x, y, particleTexture, {
+      lifespan: { min: 380, max: spores ? 980 : 720 }, frequency: spores ? 145 : 110, quantity: 1,
+      speed: { min: spores ? 10 : 8, max: scorched ? 62 : spores ? 42 : 35 },
+      angle: scorched ? { min: 248, max: 292 } : { min: 210, max: 330 },
+      gravityY: scorched ? -28 : spores ? -42 : 0,
+      scale: { start: scorched ? 0.52 : spores ? 0.58 : 0.42, end: 0 }, alpha: { start: 0.66, end: 0 },
+      tint: magstorm ? [0x806bff, 0xb8a7ff, 0xffffff]
+        : scorched ? [0xff3d08, 0xff9b25, 0xffed76]
+          : spores ? [0x57c968, 0x9ef07a, 0xd9ff9b] : [zoneColor, 0xffffff],
+      blendMode: Phaser.BlendModes.ADD,
       emitZone: { type: 'random', source: new Phaser.Geom.Circle(0, 0, radius * 0.82) },
     }).setDepth(2040);
+    const fieldStyle = magstorm ? 'magstorm' : scorched ? 'scorched' : spores ? 'spores' : mode === 'fire' ? 'fire' : mode === 'poison' ? 'poison' : null;
+    const shaderField = fieldStyle ? this.vfxRuntime?.field(fieldStyle, x, y, radius, { depth: 2036 }) : null;
+    if (magstorm) this.vfxRuntime?.burst('magstorm', x, y, radius * 0.66, { intensity: 0.9 });
+    if (scorched) this.vfxRuntime?.burst('blast', x, y, radius * 0.58, { intensity: 0.8 });
+    if (spores) this.playSporeFieldPulseFx(x, y, radius, true);
     this.effectZones.push({
       id: this.nextEffectZoneId++, x, y, radius, dps, t: duration, tick: 0,
-      sourceTower, mode, ring, particles,
+      sourceTower, mode, ring, particles, shaderField, age: 0, visualTick: 0, pulseTick: 0,
     });
   }
 
@@ -3416,30 +3386,37 @@ export class GameScene extends Phaser.Scene {
     for (const zone of this.effectZones) {
       zone.t -= dts;
       zone.tick -= dts;
+      zone.age = (zone.age || 0) + dts;
+      zone.visualTick = (zone.visualTick || 0) - dts;
+      zone.pulseTick = (zone.pulseTick || 0) - dts;
+      zone.shaderField?.set({ progress: (Math.sin(zone.age * 2.4) + 1) * 0.5 });
+      zone.ring?.setScale(1 + Math.sin(zone.age * 4.6) * 0.035).setAlpha(0.78 + Math.sin(zone.age * 3.8) * 0.12);
       if (zone.tick <= 0) {
         zone.tick = 0.25;
-        for (const enemy of this.nearbyEnemies(zone.x, zone.y, zone.radius)) {
+        const targets = this.nearbyEnemies(zone.x, zone.y, zone.radius);
+        for (const enemy of targets) {
           if (zone.mode === 'poison') {
-            enemy.applyPoison(zone.dps, zone.sourceTower.ultimate === 'blackdeath' ? 3 : 1, false, zone.sourceTower, {
+            enemy.applyPoison(zone.dps, 1, false, zone.sourceTower, {
               sourceBonus: this.sourceBonusFor(zone.sourceTower, enemy),
             });
           } else {
-            if (zone.mode === 'fire' && zone.sourceTower.ultimate === 'eternal') {
-              enemy.eternalFireMarks = (enemy.eternalFireMarks || [])
-                .filter(mark => mark.expiresAt > this.time.now && mark.id !== zone.id);
-              enemy.eternalFireMarks.push({
-                id: zone.id,
-                expiresAt: this.time.now + 350,
-                dps: zone.dps,
-                sourceTower: zone.sourceTower,
-              });
-            }
             this.damageEnemy(zone.sourceTower, enemy, zone.dps * 0.25, '#ffffff', { trueDmg: zone.mode === 'fire', show: false });
           }
+        }
+        if (zone.sourceTower?.skill === 'magstorm' && zone.visualTick <= 0 && targets.length) {
+          const strikeTarget = Phaser.Utils.Array.GetRandom(targets.slice(0, Math.min(4, targets.length)));
+          this.playVerticalLightningFx(strikeTarget.x, strikeTarget.y);
+          zone.visualTick = 0.32;
+        }
+        if (zone.sourceTower?.skill === 'spores' && zone.pulseTick <= 0) {
+          this.playSporeFieldPulseFx(zone.x, zone.y, zone.radius, false);
+          zone.pulseTick = 1.15;
         }
       }
       if (zone.t <= 0) {
         zone.particles.stop();
+        zone.shaderField?.destroy();
+        zone.shaderField = null;
         this.tweens.add({ targets: zone.ring, alpha: 0, duration: 180, onComplete: () => zone.ring.destroy() });
         this.time.delayedCall(760, () => zone.particles.destroy());
       }
@@ -3473,7 +3450,7 @@ export class GameScene extends Phaser.Scene {
     this.updateUI();
   }
 
-  fireTowerUpgrade(t, target, { projectileLaunched = false } = {}) {
+  fireTowerUpgrade(t, target, { projectileLaunched = false, forceProc = false } = {}) {
     if (!projectileLaunched) {
       t.resetCooldown();
       t.recoil();
@@ -3488,14 +3465,13 @@ export class GameScene extends Phaser.Scene {
 
     if (t.elem === 'fire') {
       const tx = target.x, ty = target.y;
-      const force = t.ultimate === 'supernova' && t.attackCount % 5 === 0;
       if (skill === 'molten') {
-        const crit = force || Math.random() < [0.2, 0.26, 0.32, 0.38, 0.44, 0.5][f];
+        const crit = forceProc || Math.random() < [0.2, 0.26, 0.32, 0.38, 0.44, 0.5][f];
         this.damageEnemy(t, target, dmg * 1.9 * (crit ? 2.5 : 1), crit ? '#ffe97a' : '#ffb199');
-        this.playFireBurstFx(tx, ty, crit ? 70 : 48, t.color);
+        this.playMoltenImpactFx(t.slot.x, t.slot.y - 50, tx, ty, crit);
         if (crit) this.playSkillProcParticles(t, tx, ty, 1.25);
         if (crit && r > 0) {
-          const radius = (40 + 20 * r) * (t.ultimate === 'supernova' ? 1.6 : 1);
+          const radius = 40 + 20 * r;
           for (const enemy of this.nearbyEnemies(tx, ty, radius, [target])) this.damageEnemy(t, enemy, dmg * (0.1 + 0.1 * r), '#ffb199');
         }
         return;
@@ -3503,17 +3479,17 @@ export class GameScene extends Phaser.Scene {
       this.damageEnemy(t, target, dmg, '#ffb199');
       if (!skill) return;
       if (skill === 'blast') {
-        const radius = (62 + 20 * r) * (t.ultimate === 'supernova' ? 1.6 : 1);
+        const radius = 62 + 20 * r;
         for (const enemy of this.nearbyEnemies(tx, ty, radius, [target])) this.damageEnemy(t, enemy, dmg * (0.35 + 0.1 * r), '#ffb199');
-        this.playFireBurstFx(tx, ty, radius * 0.72, t.color);
-        if (force || Math.random() < [0.3, 0.5, 0.55, 0.6, 0.65, 0.7][f]) {
+        this.playFireBurstFx(tx, ty, radius * 0.72, t.color, 'blast');
+        if (forceProc || Math.random() < [0.3, 0.5, 0.55, 0.6, 0.65, 0.7][f]) {
           this.addElementZone(tx, ty, { radius: Math.max(46, radius * 0.55), dps: dmg * 0.35, duration: 2, color: t.color, sourceTower: t, mode: 'fire' });
           this.playSkillProcParticles(t, tx, ty, 1);
         }
         return;
       }
-      if (force || Math.random() < [0.25, 0.32, 0.39, 0.46, 0.53, 0.6][f]) {
-        const radius = (70 + 15 * r) * (t.ultimate === 'supernova' ? 1.6 : 1);
+      if (forceProc || Math.random() < [0.25, 0.32, 0.39, 0.46, 0.53, 0.6][f]) {
+        const radius = 70 + 15 * r;
         this.addElementZone(tx, ty, {
           radius, dps: dmg * (0.25 + 0.08 * r),
           duration: 3 + (t.ranks.power >= 3 ? 0.5 : 0) + (t.ranks.power >= 5 ? 0.5 : 0),
@@ -3525,23 +3501,17 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (t.elem === 'ice') {
-      if (t.ultimate === 'iceage' && this.time.now - t.lastUltimateAt >= 8000) {
-        t.lastUltimateAt = this.time.now;
-        for (const enemy of this.enemies.filter(enemy => !enemy.dead
-          && Phaser.Math.Distance.Between(t.slot.x, t.slot.y, enemy.x, enemy.y) <= t.range)) enemy.applyFreeze(enemy.boss ? 0.35 : 1.2);
-        this.playFrostNovaFx(t.slot.x, t.slot.y, t.range, true);
-      }
       this.damageEnemy(t, target, dmg, '#bfe8ff');
       if (!target.dead) target.applySlow(70, 1.5, 15, 0);
       if (!skill) return;
-      const repeat = t.ultimate === 'myriad' ? 1.6 : 1;
       if (skill === 'mirror') {
         const cadence = [4, 3, 3, 3, 2, 2][f];
         if (t.attackCount % cadence === 0) {
           const extra = 2 + (r >= 2 ? 1 : 0) + (r >= 4 ? 1 : 0);
-          for (const enemy of this.nearbyEnemies(target.x, target.y, 210, [target]).slice(0, extra)) {
-            this.lightBeam(target.x, target.y, enemy.x, enemy.y - 10);
-            this.damageEnemy(t, enemy, dmg * (0.45 + 0.08 * r) * repeat, '#bfe8ff');
+          const splitTargets = this.nearbyEnemies(target.x, target.y, 210, [target]).slice(0, extra);
+          this.playMirrorSplitFx(target.x, target.y, splitTargets, f >= 3);
+          for (const enemy of splitTargets) {
+            this.damageEnemy(t, enemy, dmg * (0.45 + 0.08 * r), '#bfe8ff');
             if (!enemy.dead) enemy.applySlow(70, 1.5, 15, 0);
           }
           this.playSkillProcParticles(t, target.x, target.y, 1);
@@ -3549,32 +3519,24 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       const chance = skill === 'glacier' ? [0.25, 0.35, 0.4, 0.45, 0.5, 0.55][f] : [0.2, 0.3, 0.35, 0.4, 0.45, 0.5][f];
-      if (Math.random() >= chance) return;
+      if (!forceProc && Math.random() >= chance) return;
       const radius = (skill === 'glacier' ? 90 : 100) + 15 * r;
-      this.playFrostNovaFx(target.x, target.y, radius, t.lv >= 7);
+      if (skill === 'glacier') this.playFrostNovaFx(target.x, target.y, radius, t.lv >= 7, 'glacier');
+      else this.playVortexFx(target.x, target.y, radius, t.lv >= 7);
       this.playSkillProcParticles(t, target.x, target.y, 1.15);
       for (const enemy of this.nearbyEnemies(target.x, target.y, radius)) {
-        if (skill === 'glacier') this.damageEnemy(t, enemy, dmg * (0.45 + 0.08 * r) * repeat, '#bfe8ff');
+        if (skill === 'glacier') this.damageEnemy(t, enemy, dmg * (0.45 + 0.08 * r), '#bfe8ff');
         if (!enemy.dead) enemy.applySlow(70, 2, skill === 'glacier' ? 30 : 25, 3 * t.ranks.power);
-        if (skill === 'vortex' && !enemy.boss) enemy.progress = Math.max(0, enemy.progress - (25 + 5 * r));
-        if (t.ultimate === 'reverse') {
-          if (enemy.boss) {
-            enemy.applySlow(90, 2, 50, 20);
-          } else if (this.time.now - (enemy.lastReverseAt || -Infinity) >= 5000 && Math.random() < 0.12) {
-            enemy.lastReverseAt = this.time.now;
-            enemy.progress = Math.max(0, enemy.progress - enemy.path.total * 0.08);
-          }
-        }
+        if (skill === 'vortex' && !enemy.boss) enemy.progress = Math.max(0, enemy.progress - (25 + 5 * r + 5 * t.ranks.power));
       }
       return;
     }
 
     if (t.elem === 'lightning') {
-      const capacitorBurst = t.ultimate === 'capacitor' && t.chargeStreak >= 3;
-      const electricDmg = dmg * (capacitorBurst ? 2 : 1);
+      const electricDmg = dmg;
       let targets = [target];
       if (skill === 'chain' || !skill) {
-        const count = (skill ? 3 : 2) + (skill ? Math.floor((r + 1) / 2) : 0) + (t.ultimate === 'skynet' ? 6 : 0);
+        const count = (skill ? 3 : 2) + (skill ? Math.floor((r + 1) / 2) : 0);
         while (targets.length < count) {
           const last = targets.at(-1);
           const next = this.nearbyEnemies(last.x, last.y, 160, targets)[0];
@@ -3582,22 +3544,34 @@ export class GameScene extends Phaser.Scene {
           targets.push(next);
         }
       }
-      this.playLightningChainFx(sx, sy, targets, t.visualBranch);
+      const beamProfile = skill === 'nexus' ? 'nexus' : skill === 'magstorm' ? 'storm' : 'chain';
+      this.playLightningChainFx(sx, sy, targets, beamProfile);
       let triggered = skill === 'chain' && targets.length > 1;
+      let stunnedAny = false;
+      const chargedChain = skill === 'chain' && f > 0 && t.attackCount % Math.max(2, 6 - f) === 0;
       targets.forEach((enemy, i) => {
-        const decay = t.ultimate === 'skynet' ? 1 : Math.max(0.35, 1 - i * Math.max(0.05, 0.2 - 0.03 * r));
+        const decay = chargedChain && i === 1
+          ? 1
+          : Math.max(0.35, 1 - i * Math.max(0.05, 0.2 - 0.03 * r));
         this.damageEnemy(t, enemy, electricDmg * decay * (skill === 'nexus' ? 1.35 : 1), '#fff2a8');
-        if (skill === 'nexus' && !enemy.dead && Math.random() < [0.18, 0.28, 0.34, 0.4, 0.46, 0.52][f]) {
-          triggered = enemy.applyStun(0.8 + (t.ranks.power >= 3 ? 0.15 : 0) + (t.ranks.power >= 5 ? 0.15 : 0)) || triggered;
-          if (triggered) this.playStunRingFx(enemy.x, enemy.y);
-        }
-        if (t.ultimate === 'stormeye' && !enemy.dead) {
-          enemy.stormMarks ||= {};
-          enemy.stormMarks[t.id] = (enemy.stormMarks[t.id] || 0) + 1;
-          if (enemy.stormMarks[t.id] >= 8) {
-            enemy.stormMarks[t.id] = 0;
-            this.damageEnemy(t, enemy, electricDmg * 3.5, '#fff2a8');
-            this.playSkillProcParticles(t, enemy.x, enemy.y, 1.6);
+        if (skill === 'nexus' && !enemy.dead && (forceProc || Math.random() < [0.18, 0.28, 0.34, 0.4, 0.46, 0.52][f])) {
+          const stunned = enemy.applyStun(0.8 + (t.ranks.power >= 3 ? 0.15 : 0) + (t.ranks.power >= 5 ? 0.15 : 0));
+          triggered = stunned || triggered;
+          stunnedAny = stunnedAny || stunned;
+          if (stunned) {
+            this.playStunRingFx(enemy.x, enemy.y);
+            if (r > 0) {
+              const conducted = this.nearbyEnemies(enemy.x, enemy.y, 70 + 15 * r, [enemy])[0];
+              if (conducted) {
+                this.playLightningChainFx(
+                  enemy.x,
+                  enemy.y,
+                  [{ x: conducted.x, y: conducted.y + 10 }],
+                  'conducted',
+                );
+                this.damageEnemy(t, conducted, electricDmg * 0.25, '#fff2a8');
+              }
+            }
           }
         }
       });
@@ -3605,70 +3579,78 @@ export class GameScene extends Phaser.Scene {
         triggered = true;
         this.addElementZone(target.x, target.y, {
           radius: 90 + 15 * r, dps: electricDmg * (0.4 + 0.08 * r),
-          duration: 2.5 + (t.ranks.power >= 3 ? 0.5 : 0), color: t.color, sourceTower: t,
+          duration: 2.5 + (t.ranks.power >= 3 ? 0.5 : 0) + (t.ranks.power >= 5 ? 0.5 : 0), color: t.color, sourceTower: t,
         });
       }
-      if (triggered && t.ultimate === 'capacitor') {
-        t.cooldown -= 0.3;
-        t.chargeStreak = capacitorBurst ? 0 : Math.min(3, t.chargeStreak + 1);
-        if (capacitorBurst) this.playSkillProcParticles(t, target.x, target.y, 1.65);
-      }
       if (triggered) this.playSkillProcParticles(t, target.x, target.y, 1.1);
+      if (stunnedAny) Sfx.stun();
+      else Sfx.hit();
       return;
     }
 
     if (t.elem === 'light') {
-      this.lightBeam(sx, sy, target.x, target.y - 10);
+      if (skill === 'refraction') {
+        const count = 2 + Math.floor((r + 1) / 2);
+        const focused = f > 0 && t.attackCount % Math.max(2, 7 - f) === 0;
+        const secondaries = this.nearbyEnemies(target.x, target.y, 190 + 15 * r, [target]).slice(0, count);
+        this.playRefractionFx(sx, sy, target, secondaries, focused);
+        this.damageEnemy(t, target, dmg * (target.flying ? 1.3 : 1), '#fff8dc');
+        for (const enemy of secondaries) this.damageEnemy(t, enemy, dmg * (focused ? 1 : 0.4 + 0.08 * r), '#fff8dc');
+        return;
+      }
+      this.playHolyBeamFx(sx, sy, target, skill === 'judgement' ? 'judgement' : 'radiance');
       if (skill === 'judgement') {
         const threshold = [0.12, 0.16, 0.19, 0.22, 0.25, 0.28][t.ranks.power];
-        const eliteBonus = t.ultimate === 'finaljudgement' && target.elite ? 0.08 : 0;
-        if (!target.boss && target.hp / target.maxHp <= threshold + eliteBonus) {
+        if (!target.boss && target.hp / target.maxHp <= threshold) {
           this.showDmg(target.x, target.y - 50, tr('game.execute'), '#fff8dc');
           target.takeDamage(target.hp + 1, { trueDmg: true, cause: 'execute', sourceTower: t });
+          if (r > 0) {
+            const radius = 60 + 15 * r;
+            for (const enemy of this.nearbyEnemies(target.x, target.y, radius, [target])) {
+              this.damageEnemy(t, enemy, dmg * (0.2 + 0.08 * r), '#fff8dc');
+            }
+          }
+          if (f > 0) t.cooldown = Math.min(t.cooldown, Math.max(0.25, 0.8 - 0.08 * f));
+          this.playExecuteFx(t, target.x, target.y);
           this.playSkillProcParticles(t, target.x, target.y, 1.4);
           return;
         }
       }
-      this.damageEnemy(t, target, dmg * (target.flying ? 1.3 : 1), '#fff8dc');
-      if (skill === 'refraction') {
-        const count = 2 + Math.floor((r + 1) / 2);
-        for (const enemy of this.nearbyEnemies(target.x, target.y, 190 + 15 * r, [target]).slice(0, count)) {
-          this.lightBeam(target.x, target.y, enemy.x, enemy.y - 10);
-          this.damageEnemy(t, enemy, dmg * (0.4 + 0.08 * r), '#fff8dc');
-        }
-      }
-      if (t.ultimate === 'sevenlight' && t.attackCount % 7 === 0) {
-        const enemies = this.enemies.filter(enemy => !enemy.dead && Phaser.Math.Distance.Between(t.slot.x, t.slot.y, enemy.x, enemy.y) <= t.range);
-        for (let i = 0; i < 7 && enemies.length; i++) {
-          const enemy = enemies[i % enemies.length];
-          this.lightBeam(enemy.x, enemy.y - 120, enemy.x, enemy.y);
-          this.damageEnemy(t, enemy, dmg * 0.7, '#fff8dc');
-        }
-        this.playSkillProcParticles(t, target.x, target.y, 1.5);
-      }
+      const judgementBossMult = skill === 'judgement' && target.boss
+        && target.hp / target.maxHp <= [0.12, 0.16, 0.19, 0.22, 0.25, 0.28][t.ranks.power]
+        ? 1.5 + 0.1 * t.ranks.power
+        : 1;
+      this.damageEnemy(t, target, dmg * (target.flying ? 1.3 : 1) * judgementBossMult, '#fff8dc');
       return;
     }
 
     this.damageEnemy(t, target, dmg * 0.35, '#9ef07a');
     if (target.dead) return;
-    let poisonDps = dmg * this.plagueDamageMult(t);
-    if (t.ultimate === 'dissolve') poisonDps *= 1 + Math.min(0.4, target.armor * 0.5);
-    target.applyPoison(poisonDps, t.ultimate === 'blackdeath' ? 3 : 1, false, t, { sourceBonus: this.sourceBonusFor(t, target) });
+    const poisonDps = dmg;
+    target.applyPoison(poisonDps, 1, false, t, { sourceBonus: this.sourceBonusFor(t, target) });
+    if (skill === 'plague') {
+      this.vfxRuntime?.burst('plague', target.x, target.y - 6, 38, { intensity: 0.58 });
+      this.vfxRuntime?.emit('plague', target.x, target.y - 4, 6);
+    } else if (skill === 'spores') {
+      this.vfxRuntime?.burst('spores', target.x, target.y - 6, 34, { intensity: 0.52 });
+      this.vfxRuntime?.emit('spores', target.x, target.y - 4, 5);
+    }
     if (skill === 'corrosion') {
       const n = t.ranks.power;
       target.applyCorrosion([0.08, 0.11, 0.14, 0.17, 0.2, 0.23][n], 5, [0.15, 0.2, 0.25, 0.3, 0.35, 0.4][n]);
+      this.playCorrosionHitFx(target.x, target.y, n >= 3);
     }
     if (skill === 'spores' && t.attackCount % [5, 4, 4, 3, 3, 2][f] === 0) {
       this.addElementZone(target.x, target.y, {
         radius: 80 + 15 * r, dps: dmg * (0.18 + 0.08 * r),
-        duration: 4 + (t.ranks.power >= 3 ? 0.5 : 0), color: t.color, sourceTower: t, mode: 'poison',
+        duration: 4 + (t.ranks.power >= 3 ? 0.5 : 0) + (t.ranks.power >= 5 ? 0.5 : 0), color: t.color, sourceTower: t, mode: 'poison',
       });
       this.playSkillProcParticles(t, target.x, target.y, 1.15);
     }
     this.showDmg(target.x, target.y - 55, '☠', '#9ef07a');
   }
 
-  launchElementProjectile(t, target) {
+  launchElementProjectile(t, target, { forceProc = false } = {}) {
     t.resetCooldown();
     t.recoil();
     t.attackCount++;
@@ -3681,16 +3663,19 @@ export class GameScene extends Phaser.Scene {
     const headingDeg = Phaser.Math.RadToDeg(heading);
     const isFire = t.elem === 'fire';
     const isIce = t.elem === 'ice';
-    const texture = isFire ? 'fire_orb' : isIce ? 'ice_bolt' : 'bullet';
-    const trailTexture = isFire ? 'fire_ember' : isIce ? 'ice_speck' : 'spark';
+    const isPoison = t.elem === 'poison';
+    const poisonTexture = t.skill === 'plague' ? 'venom_flask_plague'
+      : t.skill === 'corrosion' ? 'venom_flask_corrosion' : 'venom_flask';
+    const texture = isFire ? 'fire_orb' : isIce ? 'ice_bolt' : poisonTexture;
+    const trailTexture = isFire ? 'fire_ember' : isIce ? 'ice_speck' : 'poison_drop';
     const projectile = this.add.image(sx, sy, texture).setDepth(2050).setRotation(heading);
     if (isFire) projectile.setScale(t.skill === 'molten' ? 1.34 : 1.12).setBlendMode(Phaser.BlendModes.ADD);
     else if (isIce) projectile.setScale(1.18, 0.56).setBlendMode(Phaser.BlendModes.ADD);
-    else projectile.setScale(0.94, 1.18).setTint(t.color).setBlendMode(Phaser.BlendModes.ADD);
+    else projectile.setScale(0.74).setRotation(heading + 0.35);
 
     const trail = this.add.particles(0, 0, trailTexture, {
       follow: projectile,
-      frequency: isFire ? 12 : isIce ? 34 : 18,
+      frequency: isFire ? 12 : isIce ? 34 : 28,
       lifespan: isFire ? { min: 260, max: 480 } : isIce ? { min: 110, max: 220 } : { min: 300, max: 520 },
       angle: { min: headingDeg + (isIce ? 172 : 145), max: headingDeg + (isIce ? 188 : 215) },
       speed: isFire ? { min: 18, max: 65 } : isIce ? { min: 5, max: 22 } : { min: 4, max: 26 },
@@ -3699,8 +3684,10 @@ export class GameScene extends Phaser.Scene {
       alpha: { start: 0.94, end: 0 },
       tint: isFire ? [0xffef9a, 0xff7a38, 0xe93622]
         : isIce ? [0xffffff, 0xa7efff, 0x5db8ff]
-          : [0xe1ff8c, 0x82e34f, 0x339b38],
-      blendMode: Phaser.BlendModes.ADD,
+          : t.skill === 'plague' ? [0x78558f, 0x9d77b3, 0xa6d35f]
+            : t.skill === 'corrosion' ? [0x9ebd24, 0xdfff62, 0xffffc5]
+              : [0x57c968, 0x9ef07a, 0xd9ff9b],
+      blendMode: isPoison ? Phaser.BlendModes.NORMAL : Phaser.BlendModes.ADD,
     }).setDepth(2049);
 
     const distance = Phaser.Math.Distance.Between(sx, sy, tx, ty);
@@ -3726,9 +3713,9 @@ export class GameScene extends Phaser.Scene {
           Phaser.Math.Linear(sx, tx, q) + perpX * side,
           Phaser.Math.Linear(sy, ty, q) + perpY * side,
         );
-        if (!isFire && !isIce) {
-          const pulse = 1 + Math.sin(q * Math.PI * 6) * 0.13;
-          projectile.setScale(0.94 * pulse, 1.18 / pulse).setRotation(heading + Math.sin(q * Math.PI * 4) * 0.26);
+        if (isPoison) {
+          const pulse = 1 + Math.sin(q * Math.PI * 6) * 0.08;
+          projectile.setScale(0.74 * pulse).setRotation(heading + 0.35 + q * Math.PI * 3.5);
         }
       },
       onComplete: () => {
@@ -3741,16 +3728,16 @@ export class GameScene extends Phaser.Scene {
         const resolvedTarget = !target.dead ? target : this.nearbyEnemies(impactX, impactY, 80)[0];
         if (!resolvedTarget) return;
         Sfx.hit();
-        this.fireTowerUpgrade(t, resolvedTarget, { projectileLaunched: true });
+        this.fireTowerUpgrade(t, resolvedTarget, { projectileLaunched: true, forceProc });
       },
     });
   }
 
-  fireTower(t, target) {
+  fireTower(t, target, options = {}) {
     if (t.elem === 'fire' || t.elem === 'ice' || t.elem === 'poison') {
-      return this.launchElementProjectile(t, target);
+      return this.launchElementProjectile(t, target, options);
     }
-    return this.fireTowerUpgrade(t, target);
+    return this.fireTowerUpgrade(t, target, options);
     t.resetCooldown();
     t.recoil();
     const dmg = t.dmg;
@@ -4018,7 +4005,7 @@ export class GameScene extends Phaser.Scene {
         } else if (elem === 'poison') {
           if (!target.dead) {
             target.applyPoison(
-              dmg * this.plagueDamageMult(t),
+              dmg,
               lv >= BRANCH_START_LV ? 2 : 1,
               false,
               t,
@@ -4219,14 +4206,11 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.lastStandActive) dts *= 0.5;
     if (this.dying) return;
-    this.runElapsed += dts;
-    this.autoDraftCooldown = Math.max(0, this.autoDraftCooldown - dts);
     if (this.waveState === 'active') {
       this.waveCombatTime += dts;
       this.waveTimeLeft = Math.max(0, this.waveTimeLeft - dts);
       this.waveText.setText(`${this.wave} · ${DIFFICULTIES[this.difficulty].cn} · ${Math.ceil(this.waveTimeLeft)}s`);
     }
-    this.updateAutoUpgradeFlow();
     this.updateDraftHud();
 
     // 敌人
@@ -4242,7 +4226,7 @@ export class GameScene extends Phaser.Scene {
     // 塔开火
     for (const t of this.towers) {
       if (t.dragging) continue;
-      t.tickCooldown(dts, buff * this.hiveAttackMult(t));
+      t.tickCooldown(dts, buff * this.holyAuraRateMult(t));
       if (t.ready()) {
         const target = this.targetFor(t);
         if (target) this.fireTower(t, target);
@@ -4287,6 +4271,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.burnZones = this.burnZones.filter(z => z.t > 0);
     this.updateElementZones(dts);
+    this.updateCombatVfx(dts);
 
     // Boss 血条
     const bosses = this.enemies.filter(e => e.boss);
