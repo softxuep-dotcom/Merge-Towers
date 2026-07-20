@@ -643,17 +643,14 @@ export class GameScene extends Phaser.Scene {
 
   upgradeStateFor(tower) {
     const cost = upgradeCostFor(tower);
-    if (!Number.isFinite(cost)) return { cost, goldCost: Infinity, payment: null, waveLocked: false };
+    if (!Number.isFinite(cost)) return { cost, goldCost: Infinity, payment: null };
     const goldCost = Math.round(cost * GOLD_PER_SOURCE);
-    const waveLocked = tower.lastUpgradeWave === this.wave;
-    const payment = waveLocked
-      ? null
-      : this.sourceEnergy + 1e-6 >= cost
-        ? 'energy'
-        : this.gold >= goldCost
-          ? 'gold'
-          : null;
-    return { cost, goldCost, payment, waveLocked };
+    const payment = this.sourceEnergy + 1e-6 >= cost
+      ? 'energy'
+      : this.gold >= goldCost
+        ? 'gold'
+        : null;
+    return { cost, goldCost, payment };
   }
 
   upgradeableTowers() {
@@ -688,21 +685,16 @@ export class GameScene extends Phaser.Scene {
       label = t('game.upgradeReadyHint');
       progress = 1;
     } else {
-      const availableThisWave = pending.filter(tower => !this.upgradeStateFor(tower).waveLocked);
-      if (!availableThisWave.length) {
-        label = t('game.upgradeWaitNextWave');
-      } else {
-        const next = availableThisWave
-          .map(tower => this.upgradeStateFor(tower))
-          .sort((a, b) => a.cost - b.cost)[0];
-        label = t('game.upgradeChargingHint', {
-          source: this.sourceEnergy.toFixed(1),
-          cost: this.formatUpgradeCost(next.cost),
-          gold: Math.floor(this.gold),
-          goldCost: next.goldCost,
-        });
-        progress = Math.max(this.sourceEnergy / next.cost, this.gold / next.goldCost);
-      }
+      const next = pending
+        .map(tower => this.upgradeStateFor(tower))
+        .sort((a, b) => a.cost - b.cost)[0];
+      label = t('game.upgradeChargingHint', {
+        source: this.sourceEnergy.toFixed(1),
+        cost: this.formatUpgradeCost(next.cost),
+        gold: Math.floor(this.gold),
+        goldCost: next.goldCost,
+      });
+      progress = Math.max(this.sourceEnergy / next.cost, this.gold / next.goldCost);
     }
     this.draftStatusText.setText(label);
     const ready = readyTowers.length > 0;
@@ -740,7 +732,6 @@ export class GameScene extends Phaser.Scene {
     const elem = Phaser.Utils.Array.GetRandom(['fire', 'ice', 'lightning', 'light', 'poison']);
     const slot = Phaser.Utils.Array.GetRandom(free);
     const tower = this.placeTower(slot, elem, 1);
-    tower.lastUpgradeWave = 0;
     Sfx.buy();
     toast(this, slot.x, slot.y - 118, t('game.receivedLv1', { element: ELEMENTS[elem].cn }), this.hexColor(tower.color), 21, 1800);
     this.updateUI();
@@ -829,10 +820,6 @@ export class GameScene extends Phaser.Scene {
     if (this.over || this.dying || this.settingsOpen || this.isPaused || tower.dragging) return;
     const state = this.upgradeStateFor(tower);
     if (!Number.isFinite(state.cost)) return;
-    if (state.waveLocked) {
-      toast(this, tower.slot.x, tower.slot.y - 115, t('game.upgradeWaveLocked'), '#c8d4df', 18, 1800);
-      return;
-    }
     if (!state.payment) {
       toast(this, tower.slot.x, tower.slot.y - 115, t('game.needEnergy'), '#ffb0a2', 20, 2000);
       return;
@@ -854,7 +841,7 @@ export class GameScene extends Phaser.Scene {
   finishTowerUpgrade(tower, choice, payment = 'energy') {
     const cost = upgradeCostFor(tower);
     const goldCost = Math.round(cost * GOLD_PER_SOURCE);
-    if (!Number.isFinite(cost) || !choice || choice.disabled || tower.lastUpgradeWave === this.wave) return;
+    if (!Number.isFinite(cost) || !choice || choice.disabled) return;
     if (payment === 'gold') {
       if (this.gold < goldCost) return;
     } else {
@@ -864,7 +851,6 @@ export class GameScene extends Phaser.Scene {
     if (!applyTowerUpgrade(tower, choice)) return;
     if (payment === 'gold') this.gold -= goldCost;
     else this.sourceEnergy = Math.max(0, this.sourceEnergy - cost);
-    tower.lastUpgradeWave = this.wave;
     this.highestLv = Math.max(this.highestLv, tower.lv);
     this.upgradeOverlay.destroy();
     const reachedMaxLevel = tower.lv === MAX_LV;

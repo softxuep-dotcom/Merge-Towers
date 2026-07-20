@@ -25,7 +25,6 @@ export class Tower {
     this.skill = null;
     this.ranks = { range: 0, frequency: 0, power: 0 };
     this.attackCount = 0;
-    this.lastUpgradeWave = 0;
     this.hasMoved = false;
     this.cooldown = 0;
     this.dragging = false;
